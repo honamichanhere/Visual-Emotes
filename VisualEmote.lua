@@ -1,10 +1,3 @@
-local TARGET_PLACE_ID = 9872472334
-
-if game.PlaceId ~= TARGET_PLACE_ID then
-	warn("[Visual Emotes] Access denied. This script only for Evade!")
-	return
-end
-
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
