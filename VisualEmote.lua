@@ -10,9 +10,9 @@ local function ErrorHandler(errorMessage)
 	warn("====================================")
 end
 
--- =========================================================
+-- ========================================================
 -- VisualEmotes
--- =========================================================
+-- ========================================================
 local VisualEmotes = Instance.new("ScreenGui")
 VisualEmotes.Name = "VisualEmotes"
 VisualEmotes.IgnoreGuiInset = true
