@@ -24,6 +24,7 @@ local VisualEmotes = Instance.new("ScreenGui")
 VisualEmotes.Name = "VisualEmotes"
 VisualEmotes.IgnoreGuiInset = true
 VisualEmotes.ResetOnSpawn = false
+VisualEmotes.DisplayOrder = 9999
 VisualEmotes.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
 local localPlayer = Players.LocalPlayer
