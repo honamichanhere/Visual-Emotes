@@ -20,9 +20,12 @@ end
 getgenv().MugiwaraFolder = FOLDER
 getgenv().MugiwaraRegisterCleanup = RegisterCleanup
 
-game:BindToClose(function()
+-- Dijalankan saat script dimuat ulang: hasil swap dari sesi sebelumnya dikembalikan dulu.
+local env = getgenv()
+if env.VisualEmotesCleanup then pcall(env.VisualEmotesCleanup) end
+env.VisualEmotesCleanup = function()
     for _, fn in ipairs(cleanupFns) do pcall(fn) end
-end)
+end
 
 -- ==========================================================
 -- Swap engine (ported from Games/Evade/VisualSwap.lua)
