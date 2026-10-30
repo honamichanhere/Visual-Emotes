@@ -1159,7 +1159,7 @@ local function MakeButton(parent, text, primary, width)
         BorderSizePixel = 0,
     }, parent)
     Round(pill, 9)
-    if primary then Spin(Gradient(pill, 0, CYCLE), 7) else Stroke(pill, THEME.StrokeAlpha) end
+    if primary then Gradient(pill, 0) else Stroke(pill, THEME.StrokeAlpha) end
     local label = Label(pill, {
         Text = text,
         Font = FONT_TITLE,
@@ -1205,9 +1205,11 @@ RegisterCleanup(function() pcall(function() Gui:Destroy() end) end)
 
 local camera = workspace.CurrentCamera
 local screen = camera and camera.ViewportSize or Vector2.new(1280, 720)
-local WIDTH = math.min(680, screen.X - 24)
-local HEIGHT = math.min(470, screen.Y - 24)
+local WIDTH, HEIGHT = 680, 470
+local MIN_WIDTH, MIN_HEIGHT, MAX_WIDTH, MAX_HEIGHT = 480, 340, 1000, 760
 local TOPBAR, BAR_H = 54, 56
+-- Small screens (phones) shrink the whole UI so it fits instead of being cut off.
+local UI_SCALE = math.clamp(math.min(1, (screen.X - 24) / WIDTH, (screen.Y - 24) / HEIGHT), 0.45, 1)
 
 local Main = New("Frame", {
     Name = "Main",
@@ -1216,6 +1218,7 @@ local Main = New("Frame", {
     Size = UDim2.fromOffset(WIDTH, HEIGHT),
     BackgroundTransparency = 1,
 }, Gui)
+New("UIScale", { Scale = UI_SCALE }, Main)
 
 local Pop = New("Frame", {
     AnchorPoint = Vector2.new(0.5, 0.5),
@@ -1283,7 +1286,7 @@ local brand = New("Frame", {
     BorderSizePixel = 0,
 }, TopBar)
 Round(brand, 9)
-Spin(Gradient(brand, 45, CYCLE), 8)
+Gradient(brand, 45)
 Label(brand, {
     Text = "V",
     Font = Enum.Font.GothamBlack,
@@ -1312,7 +1315,7 @@ local titleLabel = Label(titleRow, {
     Size = UDim2.fromOffset(0, 20),
     LayoutOrder = 1,
 })
-Spin(Gradient(titleLabel, 0, CYCLE), 8)
+Gradient(titleLabel, 0)
 
 local versionPill = New("Frame", {
     Size = UDim2.fromOffset(0, 16),
@@ -1323,7 +1326,7 @@ local versionPill = New("Frame", {
 }, titleRow)
 Round(versionPill, 8)
 New("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, versionPill)
-Spin(Gradient(versionPill, 0, CYCLE), 8)
+Gradient(versionPill, 0)
 Label(versionPill, {
     Text = VERSION,
     Font = FONT_TITLE,
@@ -1335,7 +1338,7 @@ Label(versionPill, {
 })
 
 Label(TopBar, {
-    Text = "by Honami",
+    Text = "by Honami  ·  K to hide or show",
     TextSize = 12,
     TextColor3 = THEME.SubText,
     Position = UDim2.fromOffset(56, 30),
@@ -1437,11 +1440,50 @@ do
     end)
     local moveConnection = UserInputService.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - dragStart
+            local delta = (input.Position - dragStart) / UI_SCALE
             Main.Position = UDim2.new(startPosition.X.Scale, startPosition.X.Offset + delta.X, startPosition.Y.Scale, startPosition.Y.Offset + delta.Y)
         end
     end)
     RegisterCleanup(function() moveConnection:Disconnect() end)
+
+    -- resize grip in the bottom-right corner (the window grows from its top-left corner)
+    local grip = New("TextButton", {
+        Name = "ResizeGrip",
+        Text = "",
+        AutoButtonColor = false,
+        BackgroundTransparency = 1,
+        AnchorPoint = Vector2.new(1, 1),
+        Position = UDim2.new(1, -4, 1, -4),
+        Size = UDim2.fromOffset(22, 22),
+        ZIndex = 8,
+    }, Pop)
+    Bar(grip, 14, 2, -45, 0.58, 0.58, THEME.Muted)
+    Bar(grip, 7, 2, -45, 0.78, 0.78, THEME.Muted)
+
+    local resizing, resizeStart, startSize, resizeOrigin = false, nil, nil, nil
+    grip.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            resizing, resizeStart, startSize, resizeOrigin = true, input.Position, Main.Size, Main.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then resizing = false end
+            end)
+        end
+    end)
+    local resizeConnection = UserInputService.InputChanged:Connect(function(input)
+        if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = (input.Position - resizeStart) / UI_SCALE
+            local maxWidth = math.max(MIN_WIDTH, math.min(MAX_WIDTH, (screen.X - 24) / UI_SCALE))
+            local maxHeight = math.max(MIN_HEIGHT, math.min(MAX_HEIGHT, (screen.Y - 24) / UI_SCALE))
+            local width = math.clamp(startSize.X.Offset + delta.X, MIN_WIDTH, maxWidth)
+            local height = math.clamp(startSize.Y.Offset + delta.Y, MIN_HEIGHT, maxHeight)
+            Main.Size = UDim2.fromOffset(width, height)
+            Main.Position = UDim2.new(
+                resizeOrigin.X.Scale, resizeOrigin.X.Offset + (width - startSize.X.Offset) / 2,
+                resizeOrigin.Y.Scale, resizeOrigin.Y.Offset + (height - startSize.Y.Offset) / 2
+            )
+        end
+    end)
+    RegisterCleanup(function() resizeConnection:Disconnect() end)
 
     -- floating round open button (like Mugiwara UI's), shown while the window is hidden
     local OpenButton = New("TextButton", {
@@ -1457,6 +1499,7 @@ do
         Visible = false,
     }, Gui)
     New("UICorner", { CornerRadius = UDim.new(1, 0) }, OpenButton)
+    New("UIScale", { Scale = UI_SCALE }, OpenButton)
     Spin(Gradient(Stroke(OpenButton, 0.15, 2), 0, CYCLE), 6)
     Spin(Gradient(Stroke(OpenButton, 0.7, 6), 0, CYCLE), 6)
     local openMark = Label(OpenButton, {
@@ -1467,7 +1510,7 @@ do
         TextXAlignment = Enum.TextXAlignment.Center,
         Size = UDim2.fromScale(1, 1),
     })
-    Spin(Gradient(openMark, 45, CYCLE), 6)
+    Gradient(openMark, 45)
 
     local opened = true
     local function SetOpen(state)
@@ -1510,8 +1553,8 @@ do
     end)
     local openMoveConnection = UserInputService.InputChanged:Connect(function(input)
         if pressed and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - pressStart
-            if delta.Magnitude > 6 then moved = true end
+            local delta = (input.Position - pressStart) / UI_SCALE
+            if delta.Magnitude * UI_SCALE > 6 then moved = true end
             if moved then
                 OpenButton.Position = UDim2.new(pressPosition.X.Scale, pressPosition.X.Offset + delta.X, pressPosition.Y.Scale, pressPosition.Y.Offset + delta.Y)
             end
@@ -1520,6 +1563,12 @@ do
     RegisterCleanup(function() openMoveConnection:Disconnect() end)
 
     MinimizeButton.MouseButton1Click:Connect(function() SetOpen(false) end)
+
+    local keyConnection = UserInputService.InputBegan:Connect(function(input, processed)
+        if processed or UserInputService:GetFocusedTextBox() then return end
+        if input.KeyCode == Enum.KeyCode.K then SetOpen(not opened) end
+    end)
+    RegisterCleanup(function() keyConnection:Disconnect() end)
 
     -- close asks first: every swapped emote is put back, and the script has to be run again to reopen
     local dialogOpen = false
@@ -1574,7 +1623,7 @@ do
             Size = UDim2.new(1, 0, 0, 0),
             LayoutOrder = 1,
         })
-        Spin(Gradient(title, 0, CYCLE), 8)
+        Gradient(title, 0)
         Label(card, {
             Text = "The interface will be closed and every swapped emote will be put back to normal. Run the script again to reopen it.",
             TextSize = 14,
