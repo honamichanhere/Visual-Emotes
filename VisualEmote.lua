@@ -1013,8 +1013,8 @@ local DaftarPath = {
 
 
 -- ==========================================================
--- UI: own implementation that copies the look of Mugiwara UI (Gear 5 theme): glass window over a
--- wallpaper, spinning neon border, gradient title / badge / buttons, white translucent cards,
+-- UI: own implementation that copies the look of Mugiwara UI (Gear 5 theme): glass window,
+-- spinning neon border, animated gradient title / badge / buttons, white translucent cards,
 -- dark inset fields and picture cells with a check badge. Layout: Base left, Target right, each
 -- with a category dropdown, a search box and an always-open grid of previews.
 -- ==========================================================
@@ -1022,12 +1022,11 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 
 local VERSION = "v2.0"
-local WALLPAPER = "rbxassetid://132136264088686"
 
 local function rgb(r, g, b) return Color3.fromRGB(r, g, b) end
 
 local THEME = {
-    Background = rgb(12, 13, 21), BackgroundAlpha = 0.22,
+    Background = rgb(12, 13, 21), BackgroundAlpha = 0.12,
     Card = rgb(255, 255, 255), CardAlpha = 0.91,
     Stroke = rgb(255, 255, 255), StrokeAlpha = 0.84,
     Field = rgb(0, 0, 0), FieldAlpha = 0.45,
@@ -1160,7 +1159,7 @@ local function MakeButton(parent, text, primary, width)
         BorderSizePixel = 0,
     }, parent)
     Round(pill, 9)
-    if primary then Gradient(pill, 0) else Stroke(pill, THEME.StrokeAlpha) end
+    if primary then Spin(Gradient(pill, 0, CYCLE), 7) else Stroke(pill, THEME.StrokeAlpha) end
     local label = Label(pill, {
         Text = text,
         Font = FONT_TITLE,
@@ -1253,16 +1252,6 @@ local Win = New("CanvasGroup", {
 }, Pop)
 Round(Win, 16)
 
-New("ImageLabel", {
-    Name = "Wallpaper",
-    Size = UDim2.fromScale(1, 1),
-    BackgroundTransparency = 1,
-    Image = WALLPAPER,
-    ImageTransparency = 0.3,
-    ScaleType = Enum.ScaleType.Crop,
-}, Win)
-New("Frame", { Name = "Scrim", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.6, BorderSizePixel = 0 }, Win)
-
 -- glass wash + sheen
 local wash = New("Frame", { Name = "Wash", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 }, Win)
 Gradient(wash, 35).Transparency = NumberSequence.new({
@@ -1294,7 +1283,7 @@ local brand = New("Frame", {
     BorderSizePixel = 0,
 }, TopBar)
 Round(brand, 9)
-Gradient(brand, 45)
+Spin(Gradient(brand, 45, CYCLE), 8)
 Label(brand, {
     Text = "V",
     Font = Enum.Font.GothamBlack,
@@ -1323,7 +1312,7 @@ local titleLabel = Label(titleRow, {
     Size = UDim2.fromOffset(0, 20),
     LayoutOrder = 1,
 })
-Gradient(titleLabel, 0)
+Spin(Gradient(titleLabel, 0, CYCLE), 8)
 
 local versionPill = New("Frame", {
     Size = UDim2.fromOffset(0, 16),
@@ -1334,7 +1323,7 @@ local versionPill = New("Frame", {
 }, titleRow)
 Round(versionPill, 8)
 New("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, versionPill)
-Gradient(versionPill, 0)
+Spin(Gradient(versionPill, 0, CYCLE), 8)
 Label(versionPill, {
     Text = VERSION,
     Font = FONT_TITLE,
@@ -1454,17 +1443,194 @@ do
     end)
     RegisterCleanup(function() moveConnection:Disconnect() end)
 
-    local minimized = false
-    MinimizeButton.MouseButton1Click:Connect(function()
-        minimized = not minimized
-        Body.Visible = not minimized
-        Tween(Main, { Size = minimized and UDim2.fromOffset(WIDTH, TOPBAR + 1) or UDim2.fromOffset(WIDTH, HEIGHT) }, 0.3, Enum.EasingStyle.Quint)
+    -- floating round open button (like Mugiwara UI's), shown while the window is hidden
+    local OpenButton = New("TextButton", {
+        Name = "OpenButton",
+        Text = "",
+        AutoButtonColor = false,
+        BorderSizePixel = 0,
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0, 36, 0.5, 0),
+        Size = UDim2.fromOffset(0, 0),
+        BackgroundColor3 = THEME.Popup,
+        BackgroundTransparency = THEME.PopupAlpha,
+        Visible = false,
+    }, Gui)
+    New("UICorner", { CornerRadius = UDim.new(1, 0) }, OpenButton)
+    Spin(Gradient(Stroke(OpenButton, 0.15, 2), 0, CYCLE), 6)
+    Spin(Gradient(Stroke(OpenButton, 0.7, 6), 0, CYCLE), 6)
+    local openMark = Label(OpenButton, {
+        Text = "V",
+        Font = Enum.Font.GothamBlack,
+        TextSize = 22,
+        TextColor3 = Color3.new(1, 1, 1),
+        TextXAlignment = Enum.TextXAlignment.Center,
+        Size = UDim2.fromScale(1, 1),
+    })
+    Spin(Gradient(openMark, 45, CYCLE), 6)
+
+    local opened = true
+    local function SetOpen(state)
+        if state == opened then return end
+        opened = state
+        if state then
+            Main.Visible = true
+            PopScale.Scale = 0.9
+            Tween(PopScale, { Scale = 1 }, 0.5, Enum.EasingStyle.Quint)
+            Tween(Win, { GroupTransparency = 0 }, 0.3)
+            for _, ring in ipairs(glowRings) do Tween(ring.Stroke, { Transparency = ring.Base }, 0.4) end
+            Tween(OpenButton, { Size = UDim2.fromOffset(0, 0) }, 0.18)
+            task.delay(0.18, function()
+                if opened then OpenButton.Visible = false end
+            end)
+        else
+            Tween(PopScale, { Scale = 0.92 }, 0.3, Enum.EasingStyle.Quint)
+            Tween(Win, { GroupTransparency = 1 }, 0.24)
+            for _, ring in ipairs(glowRings) do Tween(ring.Stroke, { Transparency = 1 }, 0.2) end
+            task.delay(0.3, function()
+                if not opened then Main.Visible = false end
+            end)
+            OpenButton.Visible = true
+            Tween(OpenButton, { Size = UDim2.fromOffset(52, 52) }, 0.5, Enum.EasingStyle.Back)
+        end
+    end
+
+    -- the open button can be dragged; a tap (no drag) opens the window again
+    local pressed, moved, pressStart, pressPosition = false, false, nil, nil
+    OpenButton.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            pressed, moved, pressStart, pressPosition = true, false, input.Position, OpenButton.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    pressed = false
+                    if not moved then SetOpen(true) end
+                end
+            end)
+        end
     end)
-    CloseButton.MouseButton1Click:Connect(function()
-        local fns = cleanupFns
-        cleanupFns = {}
-        for _, fn in ipairs(fns) do pcall(fn) end
+    local openMoveConnection = UserInputService.InputChanged:Connect(function(input)
+        if pressed and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - pressStart
+            if delta.Magnitude > 6 then moved = true end
+            if moved then
+                OpenButton.Position = UDim2.new(pressPosition.X.Scale, pressPosition.X.Offset + delta.X, pressPosition.Y.Scale, pressPosition.Y.Offset + delta.Y)
+            end
+        end
     end)
+    RegisterCleanup(function() openMoveConnection:Disconnect() end)
+
+    MinimizeButton.MouseButton1Click:Connect(function() SetOpen(false) end)
+
+    -- close asks first: every swapped emote is put back, and the script has to be run again to reopen
+    local dialogOpen = false
+    local function ConfirmClose()
+        if dialogOpen then return end
+        dialogOpen = true
+
+        local overlay = New("TextButton", {
+            Name = "Dialog",
+            Text = "",
+            AutoButtonColor = false,
+            BorderSizePixel = 0,
+            Size = UDim2.fromScale(1, 1),
+            BackgroundColor3 = Color3.new(0, 0, 0),
+            BackgroundTransparency = 1,
+            ZIndex = 50,
+        }, Win)
+        Tween(overlay, { BackgroundTransparency = 0.42 }, 0.25)
+
+        local card = New("CanvasGroup", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.new(0, 330, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundColor3 = THEME.Popup,
+            BackgroundTransparency = THEME.PopupAlpha,
+            GroupTransparency = 1,
+            BorderSizePixel = 0,
+            Active = true,
+            ZIndex = 51,
+        }, overlay)
+        Round(card, 14)
+        local outline = Stroke(card, 1, 1.4, Color3.new(1, 1, 1))
+        Spin(Gradient(outline, 45, CYCLE), 8)
+        New("UIPadding", {
+            PaddingTop = UDim.new(0, 18), PaddingBottom = UDim.new(0, 18),
+            PaddingLeft = UDim.new(0, 18), PaddingRight = UDim.new(0, 18),
+        }, card)
+        New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 10) }, card)
+        local cardScale = New("UIScale", { Scale = 0.9 }, card)
+        Tween(cardScale, { Scale = 1 }, 0.4, Enum.EasingStyle.Quint)
+        Tween(card, { GroupTransparency = 0 }, 0.25)
+        Tween(outline, { Transparency = 0.3 }, 0.25)
+
+        local title = Label(card, {
+            Text = "Close Visual Emotes?",
+            Font = FONT_TITLE,
+            TextSize = 16,
+            TextColor3 = Color3.new(1, 1, 1),
+            TextWrapped = true,
+            AutomaticSize = Enum.AutomaticSize.Y,
+            Size = UDim2.new(1, 0, 0, 0),
+            LayoutOrder = 1,
+        })
+        Spin(Gradient(title, 0, CYCLE), 8)
+        Label(card, {
+            Text = "The interface will be closed and every swapped emote will be put back to normal. Run the script again to reopen it.",
+            TextSize = 14,
+            TextColor3 = THEME.SubText,
+            TextWrapped = true,
+            AutomaticSize = Enum.AutomaticSize.Y,
+            Size = UDim2.new(1, 0, 0, 0),
+            LayoutOrder = 2,
+        })
+
+        local row = New("Frame", { Size = UDim2.new(1, 0, 0, 36), BackgroundTransparency = 1, LayoutOrder = 3 }, card)
+        New("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            HorizontalAlignment = Enum.HorizontalAlignment.Right,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 8),
+        }, row)
+
+        local function CloseDialog()
+            Tween(cardScale, { Scale = 0.93 }, 0.2)
+            Tween(card, { GroupTransparency = 1 }, 0.2)
+            Tween(outline, { Transparency = 1 }, 0.2)
+            Tween(overlay, { BackgroundTransparency = 1 }, 0.2)
+            task.delay(0.22, function()
+                overlay:Destroy()
+                dialogOpen = false
+            end)
+        end
+
+        local function DialogButton(text, danger, order, callback)
+            local button = New("TextButton", {
+                Text = text,
+                Font = FONT_TITLE,
+                TextSize = 13,
+                TextColor3 = danger and THEME.OnAccent or THEME.Text,
+                AutoButtonColor = false,
+                BorderSizePixel = 0,
+                AutomaticSize = Enum.AutomaticSize.X,
+                Size = UDim2.fromOffset(0, 36),
+                BackgroundColor3 = danger and THEME.Danger or THEME.Card,
+                BackgroundTransparency = danger and 0 or 0.84,
+                LayoutOrder = order,
+            }, row)
+            Round(button, 9)
+            New("UIPadding", { PaddingLeft = UDim.new(0, 18), PaddingRight = UDim.new(0, 18) }, button)
+            button.MouseButton1Click:Connect(callback)
+        end
+
+        DialogButton("Cancel", false, 1, CloseDialog)
+        DialogButton("Close", true, 2, function()
+            local fns = cleanupFns
+            cleanupFns = {}
+            for _, fn in ipairs(fns) do pcall(fn) end
+        end)
+    end
+    CloseButton.MouseButton1Click:Connect(ConfirmClose)
 
     -- open animation: pop in and fade the glow up
     Tween(PopScale, { Scale = 1 }, 0.45, Enum.EasingStyle.Back)
@@ -1892,71 +2058,103 @@ local function BuildEmoteUI(Swap)
             CellPadding = UDim2.fromOffset(GAP, GAP),
         }, side.Scroll)
 
-        -- category popup (drawn over the grid)
-        local popup = New("ScrollingFrame", {
-            Visible = false,
-            ZIndex = 20,
+        -- category drawer: opens under the field and pushes the search box and the grid down,
+        -- like the Mugiwara UI dropdown (dark inset list, rows with gradient / check when chosen)
+        local DRAWER_Y = 62
+        local drawerHeight = math.min(#groups * 36 + 10, 150)
+        local drawer = Field(inner, UDim2.fromOffset(0, DRAWER_Y), UDim2.new(1, 0, 0, drawerHeight), "Frame", { ClipsDescendants = true })
+        drawer.Visible = false
+        local list = New("ScrollingFrame", {
+            BackgroundTransparency = 1,
             BorderSizePixel = 0,
-            BackgroundColor3 = THEME.Popup,
-            BackgroundTransparency = THEME.PopupAlpha,
-            Position = UDim2.fromOffset(0, 62),
-            Size = UDim2.new(1, 0, 0, math.min(#groups * 32 + 10, 210)),
+            Size = UDim2.fromScale(1, 1),
             ScrollBarThickness = 3,
+            ScrollBarImageColor3 = THEME.Muted,
             AutomaticCanvasSize = Enum.AutomaticSize.Y,
             CanvasSize = UDim2.new(),
-        }, inner)
-        Round(popup, 10)
-        Stroke(popup, 0.8)
-        New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2) }, popup)
+        }, drawer)
+        New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4) }, list)
         New("UIPadding", {
             PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 5),
-            PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 5),
-        }, popup)
+            PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 8),
+        }, list)
 
-        local items = {}
-        local function PaintItems()
-            for index, item in ipairs(items) do
-                item.TextColor3 = index == side.Group and THEME.Accent or THEME.Text
-            end
+        local rows = {}
+        local function PaintRow(index, hovered)
+            local row = rows[index]
+            local on = index == side.Group
+            row.Button.BackgroundTransparency = on and 0.78 or (hovered and 0.92 or 1)
+            row.Check.Visible = on
+            row.Stroke.Color = on and THEME.Accent or THEME.Stroke
+            row.Stroke.Transparency = on and 0.45 or (hovered and 0.78 or THEME.StrokeAlpha)
+        end
+
+        local drawerOpen = false
+        local function Layout(open)
+            drawerOpen = open
+            drawer.Visible = open
+            Tween(chevronHolder, { Rotation = open and 180 or 0 }, 0.2)
+            local searchY = open and (DRAWER_Y + drawerHeight + 6) or 64
+            local gridY = searchY + 40
+            Tween(search, { Position = UDim2.fromOffset(0, searchY) }, 0.2)
+            Tween(side.Scroll, { Position = UDim2.fromOffset(0, gridY), Size = UDim2.new(1, 0, 1, -gridY) }, 0.2)
+            task.delay(0.25, function() RefreshVisible(side) end)
         end
 
         for index, group in ipairs(groups) do
-            local item = New("TextButton", {
-                Text = group.Title .. "   ·   " .. #group.Entries,
-                Font = FONT_LABEL,
-                TextSize = 13,
-                TextColor3 = THEME.Text,
-                TextXAlignment = Enum.TextXAlignment.Left,
+            local button = New("TextButton", {
+                Text = "",
                 AutoButtonColor = false,
                 BorderSizePixel = 0,
                 BackgroundColor3 = Color3.new(1, 1, 1),
-                BackgroundTransparency = 0.95,
+                BackgroundTransparency = 1,
                 LayoutOrder = index,
-                ZIndex = 21,
-                Size = UDim2.new(1, 0, 0, 30),
-            }, popup)
-            Round(item, 7)
-            New("UIPadding", { PaddingLeft = UDim.new(0, 10) }, item)
-            item.MouseEnter:Connect(function() Tween(item, { BackgroundTransparency = 0.88 }, 0.12) end)
-            item.MouseLeave:Connect(function() Tween(item, { BackgroundTransparency = 0.95 }, 0.15) end)
-            item.MouseButton1Click:Connect(function()
+                Size = UDim2.new(1, 0, 0, 32),
+            }, list)
+            Round(button, 8)
+            Gradient(button, 0)
+            local stroke = Stroke(button, THEME.StrokeAlpha)
+            Label(button, {
+                Text = group.Title,
+                Font = FONT_LABEL,
+                Position = UDim2.fromOffset(12, 0),
+                Size = UDim2.new(1, -80, 1, 0),
+                TextTruncate = Enum.TextTruncate.AtEnd,
+            })
+            Label(button, {
+                Text = tostring(#group.Entries),
+                TextSize = 12,
+                TextColor3 = THEME.Muted,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.new(1, -34, 0, 0),
+                Size = UDim2.new(0, 36, 1, 0),
+            })
+            local checkSlot = New("Frame", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, -10, 0.5, 0),
+                Size = UDim2.fromOffset(14, 14),
+                BackgroundTransparency = 1,
+                Visible = false,
+            }, button)
+            CheckGlyph(checkSlot, 14, THEME.Accent)
+            rows[index] = { Button = button, Stroke = stroke, Check = checkSlot }
+
+            button.MouseEnter:Connect(function() PaintRow(index, true) end)
+            button.MouseLeave:Connect(function() PaintRow(index, false) end)
+            button.MouseButton1Click:Connect(function()
                 side.Group = index
                 categoryLabel.Text = group.Title
-                popup.Visible = false
-                Tween(chevronHolder, { Rotation = 0 }, 0.2)
-                PaintItems()
+                for rowIndex in ipairs(rows) do PaintRow(rowIndex, false) end
                 side.Scroll.CanvasPosition = Vector2.zero
                 for entry in pairs(failedPreview) do failedPreview[entry] = nil end
+                Layout(false)
                 Refresh()
             end)
-            items[index] = item
         end
-        PaintItems()
+        for rowIndex in ipairs(rows) do PaintRow(rowIndex, false) end
 
-        categoryButton.MouseButton1Click:Connect(function()
-            popup.Visible = not popup.Visible
-            Tween(chevronHolder, { Rotation = popup.Visible and 180 or 0 }, 0.2)
-        end)
+        categoryButton.MouseButton1Click:Connect(function() Layout(not drawerOpen) end)
 
         search:GetPropertyChangedSignal("Text"):Connect(function()
             side.Query = search.Text
