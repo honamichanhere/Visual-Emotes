@@ -1,5 +1,5 @@
 -- Visual Emotes (standalone) - by Honami
--- UI is the Mugiwara UI library; swap and preview logic ported from Mugiwara HUB's
+-- UI is built in this file (styled after Mugiwara UI); swap and preview logic ported from Mugiwara HUB's
 -- Games/Evade/VisualSwap.lua, EmotePreview.lua and VisualGridUI.lua (Carry and the hub's
 -- premium-lock plumbing removed - this script has no premium tier of its own).
 
@@ -1011,38 +1011,252 @@ local DaftarPath = {
     "ReplicatedStorage.Items.ItemPacks.Integration.M3GAN.Emotes.RobotM3GAN",
 }
 
--- ==========================================================
--- Mugiwara UI
--- ==========================================================
-local UI_VERSION = "v0.10.0"
-local UI_URL = "https://raw.githubusercontent.com/honamichanhere/Mugiwara-UI/" .. UI_VERSION .. "/dist/main.lua"
 
-local uiOk, MugiwaraUI = pcall(function() return loadstring(game:HttpGet(UI_URL))() end)
-if not uiOk or type(MugiwaraUI) ~= "table" or type(MugiwaraUI.CreateWindow) ~= "function" then
-    warn("[Visual Emotes] UI library failed to load. Please try again.")
-    return
+-- ==========================================================
+-- UI: own implementation, styled after Mugiwara UI
+-- (dark glass window, white cards, warm accent). Layout: Base on the left, Target on the
+-- right, each with a category dropdown, a search box and an always-open grid of previews.
+-- ==========================================================
+local UserInputService = game:GetService("UserInputService")
+
+local VERSION = "v2.0"
+
+local THEME = {
+    Background = Color3.fromRGB(12, 13, 21),
+    Field = Color3.fromRGB(0, 0, 0),
+    Card = Color3.fromRGB(255, 255, 255),
+    Popup = Color3.fromRGB(14, 14, 20),
+    Text = Color3.fromRGB(247, 247, 252),
+    SubText = Color3.fromRGB(192, 194, 210),
+    Muted = Color3.fromRGB(134, 136, 154),
+    Accent = Color3.fromRGB(255, 150, 40),
+    OnAccent = Color3.fromRGB(28, 12, 8),
+    Success = Color3.fromRGB(80, 230, 150),
+    Danger = Color3.fromRGB(255, 72, 92),
+}
+local FONT, FONT_BOLD = Enum.Font.Gotham, Enum.Font.GothamBold
+
+local function New(class, props, parent)
+    local instance = Instance.new(class)
+    for key, value in pairs(props) do instance[key] = value end
+    instance.Parent = parent
+    return instance
 end
-RegisterCleanup(function() pcall(function() MugiwaraUI:Destroy() end) end)
 
-local Window = MugiwaraUI:CreateWindow({
-    Title = "Visual Emotes",
-    Subtitle = "by Honami",
-    Icon = "lucide:drama",
-    Folder = FOLDER,
-    Version = "v2.0",
-    Size = UDim2.fromOffset(640, 420),
+local function Round(instance, radius)
+    return New("UICorner", { CornerRadius = UDim.new(0, radius) }, instance)
+end
+
+local function Stroke(instance, transparency, color)
+    return New("UIStroke", {
+        Color = color or THEME.Card,
+        Transparency = transparency,
+        Thickness = 1,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, instance)
+end
+
+local function Label(parent, props)
+    local merged = {
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Font = FONT,
+        TextColor3 = THEME.Text,
+        TextSize = 13,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }
+    for key, value in pairs(props) do merged[key] = value end
+    return New("TextLabel", merged, parent)
+end
+
+local function MakeButton(parent, text, primary, width)
+    local button = New("TextButton", {
+        Text = text,
+        Font = FONT_BOLD,
+        TextSize = 13,
+        AutoButtonColor = false,
+        BorderSizePixel = 0,
+        Size = UDim2.fromOffset(width, 30),
+        BackgroundColor3 = primary and Color3.new(1, 1, 1) or THEME.Card,
+        BackgroundTransparency = primary and 0 or 0.92,
+        TextColor3 = primary and THEME.OnAccent or THEME.Text,
+    }, parent)
+    Round(button, 8)
+    if primary then
+        New("UIGradient", {
+            Rotation = 90,
+            Color = ColorSequence.new(Color3.fromRGB(255, 200, 62), Color3.fromRGB(255, 122, 26)),
+        }, button)
+    else
+        Stroke(button, 0.85)
+    end
+    return button
+end
+
+local function SetEnabled(button, primary, enabled)
+    button.BackgroundTransparency = enabled and (primary and 0 or 0.92) or 0.6
+    button.TextTransparency = enabled and 0 or 0.45
+end
+
+local guiParent
+pcall(function() guiParent = (gethui and gethui()) or game:GetService("CoreGui") end)
+if not guiParent then guiParent = Players.LocalPlayer:WaitForChild("PlayerGui") end
+
+local Gui = New("ScreenGui", {
+    Name = "VisualEmotes",
+    ResetOnSpawn = false,
+    IgnoreGuiInset = true,
+    DisplayOrder = 9999,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, guiParent)
+RegisterCleanup(function() pcall(function() Gui:Destroy() end) end)
+
+local camera = workspace.CurrentCamera
+local screen = camera and camera.ViewportSize or Vector2.new(1280, 720)
+local WIDTH = math.min(660, screen.X - 24)
+local HEIGHT = math.min(440, screen.Y - 24)
+local TITLE_H, BAR_H = 40, 48
+
+local Main = New("Frame", {
+    Name = "Main",
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromScale(0.5, 0.5),
+    Size = UDim2.fromOffset(WIDTH, HEIGHT),
+    BackgroundColor3 = THEME.Background,
+    BackgroundTransparency = 0.08,
+    BorderSizePixel = 0,
+}, Gui)
+Round(Main, 12)
+Stroke(Main, 0.84)
+
+local TitleBar = New("Frame", { Name = "TitleBar", Size = UDim2.new(1, 0, 0, TITLE_H), BackgroundTransparency = 1 }, Main)
+Label(TitleBar, {
+    Text = 'Visual Emotes  <font color="#868a9a" size="12">by Honami  ·  ' .. VERSION .. "</font>",
+    RichText = true,
+    Font = FONT_BOLD,
+    TextSize = 15,
+    Position = UDim2.fromOffset(14, 0),
+    Size = UDim2.new(1, -90, 1, 0),
 })
-RegisterCleanup(function() pcall(function() Window:Destroy() end) end)
 
-local Tab = Window:Tab({ Title = "Emotes", Icon = "lucide:drama" })
-local Section = Tab:Section({ Title = "Visual Emotes", Icon = "lucide:drama", Box = true })
+local function TitleButton(text, offsetX, hoverColor)
+    local button = New("TextButton", {
+        Text = text,
+        Font = FONT_BOLD,
+        TextSize = 16,
+        TextColor3 = THEME.SubText,
+        AutoButtonColor = false,
+        BorderSizePixel = 0,
+        BackgroundColor3 = THEME.Card,
+        BackgroundTransparency = 0.94,
+        AnchorPoint = Vector2.new(1, 0.5),
+        Position = UDim2.new(1, offsetX, 0.5, 0),
+        Size = UDim2.fromOffset(26, 26),
+    }, TitleBar)
+    Round(button, 7)
+    button.MouseEnter:Connect(function()
+        button.BackgroundColor3 = hoverColor or THEME.Card
+        button.BackgroundTransparency = hoverColor and 0.6 or 0.85
+    end)
+    button.MouseLeave:Connect(function()
+        button.BackgroundColor3 = THEME.Card
+        button.BackgroundTransparency = 0.94
+    end)
+    return button
+end
+
+local CloseButton = TitleButton("×", -10, THEME.Danger)
+local MinimizeButton = TitleButton("–", -42)
+
+New("Frame", {
+    Position = UDim2.fromOffset(0, TITLE_H),
+    Size = UDim2.new(1, 0, 0, 1),
+    BackgroundColor3 = THEME.Card,
+    BackgroundTransparency = 0.9,
+    BorderSizePixel = 0,
+}, Main)
+
+local Body = New("Frame", {
+    Name = "Body",
+    Position = UDim2.fromOffset(0, TITLE_H + 1),
+    Size = UDim2.new(1, 0, 1, -(TITLE_H + 1)),
+    BackgroundTransparency = 1,
+}, Main)
+
+local PaneHolder = New("Frame", { Name = "Panes", Size = UDim2.new(1, 0, 1, -BAR_H), BackgroundTransparency = 1 }, Body)
+New("UIPadding", {
+    PaddingTop = UDim.new(0, 10), PaddingLeft = UDim.new(0, 10),
+    PaddingRight = UDim.new(0, 10), PaddingBottom = UDim.new(0, 6),
+}, PaneHolder)
+New("UIListLayout", {
+    FillDirection = Enum.FillDirection.Horizontal,
+    SortOrder = Enum.SortOrder.LayoutOrder,
+    Padding = UDim.new(0, 8),
+}, PaneHolder)
+
+local BottomBar = New("Frame", {
+    Name = "BottomBar",
+    AnchorPoint = Vector2.new(0, 1),
+    Position = UDim2.fromScale(0, 1),
+    Size = UDim2.new(1, 0, 0, BAR_H),
+    BackgroundTransparency = 1,
+}, Body)
+New("Frame", {
+    Size = UDim2.new(1, 0, 0, 1),
+    BackgroundColor3 = THEME.Card,
+    BackgroundTransparency = 0.9,
+    BorderSizePixel = 0,
+}, BottomBar)
+
+local StatusLabel = Label(BottomBar, {
+    Position = UDim2.fromOffset(14, 0),
+    Size = UDim2.new(1, -270, 1, 0),
+    TextColor3 = THEME.SubText,
+    TextTruncate = Enum.TextTruncate.AtEnd,
+})
+local RevertAllButton = MakeButton(BottomBar, "Revert All", false, 100)
+RevertAllButton.AnchorPoint = Vector2.new(1, 0.5)
+RevertAllButton.Position = UDim2.new(1, -10, 0.5, 0)
+local SwapButton = MakeButton(BottomBar, "Swap", true, 130)
+SwapButton.AnchorPoint = Vector2.new(1, 0.5)
+SwapButton.Position = UDim2.new(1, -118, 0.5, 0)
+
+-- Window behaviour: drag by the title bar, minimize, close.
+do
+    local dragging, dragStart, startPosition = false, nil, nil
+    TitleBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging, dragStart, startPosition = true, input.Position, Main.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    local moveConnection = UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            Main.Position = UDim2.new(startPosition.X.Scale, startPosition.X.Offset + delta.X, startPosition.Y.Scale, startPosition.Y.Offset + delta.Y)
+        end
+    end)
+    RegisterCleanup(function() moveConnection:Disconnect() end)
+
+    local minimized = false
+    MinimizeButton.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        Body.Visible = not minimized
+        Main.Size = minimized and UDim2.fromOffset(WIDTH, TITLE_H) or UDim2.fromOffset(WIDTH, HEIGHT)
+    end)
+    CloseButton.MouseButton1Click:Connect(function()
+        local fns = cleanupFns
+        cleanupFns = {}
+        for _, fn in ipairs(fns) do pcall(fn) end
+    end)
+end
 
 -- ==========================================================
--- Grid UI: category dropdown + viewport grid on each side, Swap/Revert
--- (ported from Games/Evade/VisualGridUI.lua; Locked/IsPremium removed - no premium tier here)
+-- Emote grid logic (ported from Games/Evade/VisualGridUI.lua, rebuilt on the UI above)
 -- ==========================================================
 local HEADER_ORDER = { "Normal", "Gamepasses", "Halloween", "Winter Holidays", "Summer", "Spring", "Valentines", "Event", "Special" }
-local LOOK = { Rotate = false, Yaw = 155, Pitch = 10, FieldOfView = 30, Zoom = 1 }
 
 local function BuildGroups(entries)
     local byHeader = {}
@@ -1072,334 +1286,498 @@ local function BuildGroups(entries)
     return groups
 end
 
-local function BuildGridUI(Section, Swap)
-    local function Notify(title, content, duration)
-        MugiwaraUI:Notify({ Title = title, Content = content, Duration = duration or 3 })
-    end
+-- Same camera as the game's emote menu: in front, a little to the right and above.
+local LOOK_DIRECTION = Vector3.new(4.25, 1.7, -8.5).Unit
 
+local function BuildEmoteUI(Swap)
     if Swap.Load() == 0 then
-        Section:Paragraph({
-            Title = "Visual Emotes Unavailable",
-            Desc = "No emotes were found in this game. The game may have changed its item folders.",
-            Icon = "lucide:triangle-alert"
+        Label(PaneHolder, {
+            Text = "No emotes were found in this game. The game may have changed its item folders.",
+            TextWrapped = true,
+            TextColor3 = THEME.SubText,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            Size = UDim2.fromScale(1, 1),
         })
+        SwapButton.Visible = false
+        RevertAllButton.Visible = false
         return
     end
 
-    local all = Swap.GetEntries()
-    local groups = BuildGroups(all)
-    local byName = {}
-    for _, entry in ipairs(all) do byName[entry.Name] = entry end
-
-    local previewState = nil
-    local previewWarned = false
-    local function PreviewsOn()
-        if previewState == nil then
-            previewState = Preview.Available() and true or false
-            if not previewState then Notify("Visual Emotes", "Previews are not available in this game version, showing icons instead.", 4) end
-        end
-        return previewState
-    end
-    local failedPreview = {}
-
-    local base, target = nil, nil
-    local notifiedWhitelist = false
+    local groups = BuildGroups(Swap.GetEntries())
     local sides = {}
-    local SwapButton
-    local Refresh
+    local failedPreview = {}
+    local previewState = nil
+    local statusToken = 0
+    local Refresh, RefreshVisible
 
     local function TitleOf(entry)
         local partner = Swap.GetPartner(entry)
         return partner and (entry.Display .. " (" .. partner.Display .. ")") or entry.Display
     end
 
-    local function ItemFor(entry, withView)
-        local item = { Title = TitleOf(entry) }
-        local model = withView and Preview.Get(entry) or nil
-        if model then
-            item.Viewport = model
+    local function ShowHint()
+        local base, target = sides.Base.Selected, sides.Target.Selected
+        local state = Swap.GetState(base, target)
+        if state == 3 then
+            StatusLabel.Text = base.Display .. " looks like " .. target.Display .. " (swapped)"
+        elseif state == 2 then
+            StatusLabel.Text = "Ready: " .. base.Display .. " will look like " .. target.Display
         else
-            item.Icon = "lucide:music"
+            StatusLabel.Text = "Pick a Base and a Target emote."
         end
-        return item
+        StatusLabel.TextColor3 = THEME.SubText
     end
 
-    local function VisibleEntries(side, onlyName, excluded)
-        local source = onlyName and { byName[onlyName] } or groups[side.Group].Entries
-        local entries = {}
-        for _, entry in ipairs(source) do
-            if entry ~= excluded then table.insert(entries, entry) end
-        end
-        return entries
+    local function SetStatus(text, color)
+        statusToken = statusToken + 1
+        local mine = statusToken
+        StatusLabel.Text = text
+        StatusLabel.TextColor3 = color or THEME.SubText
+        task.delay(3.5, function()
+            if mine == statusToken then ShowHint() end
+        end)
     end
 
-    local function Present(side, entries)
-        local items, lookup, signature = {}, {}, {}
-        for _, entry in ipairs(entries) do
-            local item = ItemFor(entry, side.IsOpen)
-            table.insert(items, item)
-            lookup[item.Title] = entry
-            table.insert(signature, item.Title .. (item.Viewport and "+" or "-"))
+    local function PreviewsOn()
+        if previewState == nil then
+            previewState = Preview.Available() and true or false
+            if not previewState then SetStatus("Previews are not available in this game version.", THEME.Danger) end
         end
-        side.Entries = entries
+        return previewState
+    end
 
-        local key = table.concat(signature, "|")
-        if key ~= side.Signature then
-            side.Signature = key
-            side.Lookup = lookup
-            side.Grid:Refresh(items, false)
-        else
-            side.Lookup = lookup
+    -- ---------- tiles ----------
+    local function AttachView(tile)
+        if tile.View then return end
+        local model = Preview.Get(tile.Entry)
+        if not model then return end
+
+        local view = New("ViewportFrame", {
+            BackgroundTransparency = 1,
+            Size = UDim2.fromScale(1, 1),
+            Ambient = Color3.fromRGB(190, 190, 190),
+            LightColor = Color3.fromRGB(255, 255, 255),
+        }, tile.Holder)
+        local clone = model:Clone()
+        clone.Parent = view
+
+        local cf, size = clone:GetBoundingBox()
+        local radius = math.max(size.X, size.Y, size.Z) / 2
+        local distance = radius / math.tan(math.rad(15)) * 1.1
+        local viewCamera = New("Camera", { FieldOfView = 30 }, view)
+        viewCamera.CFrame = CFrame.lookAt(cf.Position + LOOK_DIRECTION * distance, cf.Position)
+        view.CurrentCamera = viewCamera
+
+        tile.View = view
+        tile.Placeholder.Visible = false
+    end
+
+    local function DetachView(tile)
+        if tile.View then
+            tile.View:Destroy()
+            tile.View = nil
         end
+        tile.Placeholder.Visible = true
+    end
 
-        local chosen
-        if side == sides.Base then chosen = base else chosen = target end
-        local wanted = chosen and TitleOf(chosen) or nil
-        if side.Grid:Get() ~= wanted then side.Grid:Set(wanted, true) end
+    local function UpdateTileLook(side, tile)
+        local selected = side.Selected == tile.Entry
+        tile.Stroke.Color = selected and THEME.Accent or THEME.Card
+        tile.Stroke.Transparency = selected and 0 or 0.88
+        tile.Stroke.Thickness = selected and 2 or 1
+        tile.Name.TextColor3 = selected and THEME.Text or THEME.SubText
+    end
+
+    local function Pick(side, entry)
+        side.Selected = (side.Selected ~= entry) and entry or nil
+        Refresh()
+    end
+
+    local function MakeTile(side, entry)
+        local button = New("TextButton", {
+            Name = entry.Name,
+            Text = "",
+            AutoButtonColor = false,
+            BorderSizePixel = 0,
+            BackgroundColor3 = THEME.Field,
+            BackgroundTransparency = 0.55,
+        }, side.Scroll)
+        Round(button, 8)
+        local stroke = Stroke(button, 0.88)
+        local holder = New("Frame", {
+            BackgroundTransparency = 1,
+            ClipsDescendants = true,
+            Size = UDim2.new(1, 0, 1, -24),
+        }, button)
+        local placeholder = Label(holder, {
+            Text = "…",
+            TextSize = 18,
+            TextColor3 = THEME.Muted,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            Size = UDim2.fromScale(1, 1),
+        })
+        local name = Label(button, {
+            Text = TitleOf(entry),
+            TextSize = 11,
+            TextColor3 = THEME.SubText,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            Position = UDim2.new(0, 5, 1, -22),
+            Size = UDim2.new(1, -10, 0, 20),
+        })
+        button.MouseButton1Click:Connect(function() Pick(side, entry) end)
+        return { Entry = entry, Button = button, Stroke = stroke, Holder = holder, Placeholder = placeholder, Name = name }
+    end
+
+    local function DestroyTile(tile)
+        DetachView(tile)
+        tile.Button:Destroy()
+    end
+
+    -- Only tiles near the visible part of the scroll list hold a viewport; each one is a separate
+    -- render surface that is redrawn every frame.
+    local function IsNear(side, tile)
+        local scroll = side.Scroll
+        local top = scroll.CanvasPosition.Y
+        local bottom = top + scroll.AbsoluteWindowSize.Y
+        local y = tile.Button.AbsolutePosition.Y - scroll.AbsolutePosition.Y + top
+        local margin = 120
+        return y + tile.Button.AbsoluteSize.Y >= top - margin and y <= bottom + margin
+    end
+
+    local function UpdateVisible(side)
+        for _, tile in ipairs(side.TileList) do
+            if IsNear(side, tile) then AttachView(tile) elseif tile.View then DetachView(tile) end
+        end
+    end
+
+    local function OnBaked(entry)
+        for _, side in pairs(sides) do
+            local tile = side.TileByEntry[entry]
+            if tile and IsNear(side, tile) then AttachView(tile) end
+        end
     end
 
     local WORKERS = 3
-    local REFRESH_AFTER = { [6] = true, [14] = true, [24] = true }
-
     local function Bake(side)
         if not PreviewsOn() then return end
-        side.Token = side.Token + 1
-        local mine = side.Token
+        side.BakeToken = side.BakeToken + 1
+        local mine = side.BakeToken
 
         local pending = {}
-        for _, entry in ipairs(side.Entries or {}) do
-            if not Preview.Get(entry) and not failedPreview[entry] then table.insert(pending, entry) end
+        for _, tile in ipairs(side.TileList) do
+            if IsNear(side, tile) and not Preview.Get(tile.Entry) and not failedPreview[tile.Entry] then
+                table.insert(pending, tile.Entry)
+            end
         end
-        if #pending == 0 then
-            Refresh()
-            return
-        end
-
-        if #pending > 6 then Notify("Visual Emotes", "Rendering " .. #pending .. " previews...", 2) end
+        if #pending == 0 then return end
         Preview.Preload(pending)
 
-        local nextIndex, done, active = 1, 0, 0
-
+        local nextIndex = 1
         local function Worker()
-            while mine == side.Token and nextIndex <= #pending do
+            while mine == side.BakeToken and nextIndex <= #pending do
                 local entry = pending[nextIndex]
                 nextIndex = nextIndex + 1
 
                 local model, reason = Preview.Bake(entry)
-                if not model then
+                if model then
+                    OnBaked(entry)
+                else
                     failedPreview[entry] = true
-                    if reason ~= "unloaded" then
-                        warn("[Visual Emotes] Preview failed for " .. entry.Name .. ": " .. tostring(reason))
-                        if not previewWarned then
-                            previewWarned = true
-                            Notify("Visual Emotes", "Could not render a preview: " .. tostring(reason), 5)
-                        end
-                    end
+                    if reason ~= "unloaded" then warn("[Visual Emotes] Preview failed for " .. entry.Name .. ": " .. tostring(reason)) end
                 end
-
-                done = done + 1
-                if mine == side.Token and REFRESH_AFTER[done] then Refresh() end
             end
+        end
+        for _ = 1, math.min(WORKERS, #pending) do task.spawn(Worker) end
+    end
 
-            active = active - 1
-            if active == 0 and mine == side.Token then Refresh() end
+    RefreshVisible = function(side)
+        UpdateVisible(side)
+        Bake(side)
+    end
+
+    -- ---------- one side (Base / Target) ----------
+    local function RenderSide(side)
+        local other = side == sides.Base and sides.Target or sides.Base
+        local query = string.lower(side.Query)
+
+        local entries = {}
+        for _, entry in ipairs(groups[side.Group].Entries) do
+            if entry ~= other.Selected and (query == "" or string.find(string.lower(entry.Display), query, 1, true)) then
+                table.insert(entries, entry)
+            end
         end
 
-        for _ = 1, math.min(WORKERS, #pending) do
-            active = active + 1
-            task.spawn(Worker)
+        local list, map = {}, {}
+        for index, entry in ipairs(entries) do
+            local tile = side.TileByEntry[entry] or MakeTile(side, entry)
+            tile.Button.LayoutOrder = index
+            tile.Name.Text = TitleOf(entry)
+            list[index] = tile
+            map[entry] = tile
         end
+        for entry, tile in pairs(side.TileByEntry) do
+            if not map[entry] then DestroyTile(tile) end
+        end
+        side.TileList, side.TileByEntry = list, map
+
+        for _, tile in ipairs(list) do UpdateTileLook(side, tile) end
+
+        local selected = side.Selected
+        side.SelectedLabel.Text = selected and TitleOf(selected) or "None selected"
+        side.SelectedLabel.TextColor3 = selected and THEME.Accent or THEME.Muted
     end
 
     local function UpdateButton()
-        local state = Swap.GetState(base, target)
-        if state == 3 then
-            SwapButton:SetTitle("Revert")
-            SwapButton:SetIcon("lucide:undo-2")
-            SwapButton:SetDesc("Restore these two emotes to normal.")
-        else
-            SwapButton:SetTitle("Swap")
-            SwapButton:SetIcon("lucide:repeat")
-            SwapButton:SetDesc(state == 2 and "Swap the two emotes visually." or "Pick a Base and a Target emote first. An emote that is already swapped must be reverted before it can be swapped again.")
-        end
+        local state = Swap.GetState(sides.Base.Selected, sides.Target.Selected)
+        SwapButton.Text = state == 3 and "Revert" or "Swap"
+        SetEnabled(SwapButton, true, state ~= 1)
     end
 
     Refresh = function()
-        local targetOnly = base and Swap.GetWhitelist(base) or nil
-        local baseOnly = target and Swap.GetWhitelist(target) or nil
-
-        if target and ((targetOnly and target.Name ~= targetOnly) or target == base) then target = nil end
-        if base and ((baseOnly and base.Name ~= baseOnly) or base == target) then base = nil end
-
-        Present(sides.Base, VisibleEntries(sides.Base, baseOnly, target))
-        Present(sides.Target, VisibleEntries(sides.Target, targetOnly, base))
+        RenderSide(sides.Base)
+        RenderSide(sides.Target)
         UpdateButton()
-    end
-
-    local function Picked(entry)
-        if entry and Swap.GetWhitelist(entry) and not notifiedWhitelist then
-            notifiedWhitelist = true
-            Notify("Visual Emotes", "Whitelist applied! This emote is restricted to a specific pair.", 4)
+        ShowHint()
+        for _, side in pairs(sides) do
+            task.defer(function() RefreshVisible(side) end)
         end
-        if not entry then notifiedWhitelist = false end
     end
 
-    local function CategoryItems()
-        local items = {}
-        for _, group in ipairs(groups) do
-            table.insert(items, { Title = group.Title, Desc = #group.Entries .. " emotes", Icon = "lucide:folder" })
-        end
-        return items
-    end
-
-    local function GroupIndexOf(title)
-        for index, group in ipairs(groups) do
-            if group.Title == title then return index end
-        end
-        return 1
-    end
-
-    local function BuildSide(sideName, titleText, descText, icon, isBase)
-        local side = { Name = sideName, Group = 1, Token = 0, Signature = nil, Entries = {}, Lookup = {}, IsOpen = false }
+    local function NewSide(sideName, titleText)
+        local side = {
+            Name = sideName, Group = 1, Query = "", Selected = nil,
+            TileList = {}, TileByEntry = {}, BakeToken = 0,
+        }
         sides[sideName] = side
 
-        Section:Dropdown({
-            Title = titleText .. " Category",
-            Desc = descText,
-            Icon = "lucide:folder-open",
-            Values = CategoryItems(),
-            Value = groups[1].Title,
-            Callback = function(Option)
-                if type(Option) ~= "string" then return end
-                side.Group = GroupIndexOf(Option)
-                if isBase then base = nil else target = nil end
-                Picked(nil)
-                Refresh()
-                Bake(side)
-            end
+        local frame = New("Frame", {
+            Name = sideName,
+            LayoutOrder = sideName == "Base" and 1 or 2,
+            Size = UDim2.new(0.5, -4, 1, 0),
+            BackgroundColor3 = THEME.Card,
+            BackgroundTransparency = 0.94,
+            BorderSizePixel = 0,
+        }, PaneHolder)
+        Round(frame, 10)
+        Stroke(frame, 0.9)
+
+        local inner = New("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 }, frame)
+        New("UIPadding", {
+            PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
+            PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8),
+        }, inner)
+
+        Label(inner, { Text = titleText, Font = FONT_BOLD, Size = UDim2.new(0.5, 0, 0, 18) })
+        side.SelectedLabel = Label(inner, {
+            Text = "None selected",
+            TextSize = 12,
+            TextColor3 = THEME.Muted,
+            TextXAlignment = Enum.TextXAlignment.Right,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            Position = UDim2.fromScale(0.5, 0),
+            Size = UDim2.new(0.5, 0, 0, 18),
         })
 
-        side.Grid = Section:GridDropdown({
-            Title = titleText,
-            Icon = icon,
-            Values = {},
-            AllowNone = true,
-            Searchable = true,
-            Placeholder = "Select an emote...",
-            Columns = 4,
-            CellHeight = 124,
-            MaxHeight = 300,
-            Viewport = LOOK,
-            Callback = function(Option)
-                side.IsOpen = false
-                local entry = type(Option) == "string" and side.Lookup[Option] or nil
-                if isBase then base = entry else target = entry end
-                Picked(entry)
-                Refresh()
-            end
+        -- category dropdown
+        local categoryButton = New("TextButton", {
+            Text = "",
+            AutoButtonColor = false,
+            BorderSizePixel = 0,
+            BackgroundColor3 = THEME.Field,
+            BackgroundTransparency = 0.55,
+            Position = UDim2.fromOffset(0, 22),
+            Size = UDim2.new(1, 0, 0, 30),
+        }, inner)
+        Round(categoryButton, 8)
+        Stroke(categoryButton, 0.9)
+        local categoryLabel = Label(categoryButton, {
+            Text = groups[1].Title,
+            Position = UDim2.fromOffset(10, 0),
+            Size = UDim2.new(1, -34, 1, 0),
+            TextTruncate = Enum.TextTruncate.AtEnd,
+        })
+        Label(categoryButton, {
+            Text = "v",
+            TextSize = 12,
+            TextColor3 = THEME.Muted,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            AnchorPoint = Vector2.new(1, 0),
+            Position = UDim2.fromScale(1, 0),
+            Size = UDim2.new(0, 26, 1, 0),
         })
 
-        side.Grid.Top.MouseButton1Click:Connect(function()
-            side.IsOpen = not side.IsOpen
-            if side.IsOpen then
-                for _, entry in ipairs(side.Entries) do failedPreview[entry] = nil end
-                previewWarned = false
-                Bake(side)
-            else
+        -- search
+        local search = New("TextBox", {
+            Text = "",
+            PlaceholderText = "Search emote...",
+            PlaceholderColor3 = THEME.Muted,
+            TextColor3 = THEME.Text,
+            Font = FONT,
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ClearTextOnFocus = false,
+            BorderSizePixel = 0,
+            BackgroundColor3 = THEME.Field,
+            BackgroundTransparency = 0.55,
+            Position = UDim2.fromOffset(0, 58),
+            Size = UDim2.new(1, 0, 0, 30),
+        }, inner)
+        Round(search, 8)
+        Stroke(search, 0.9)
+        New("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, search)
+
+        -- grid, open from the start
+        side.Scroll = New("ScrollingFrame", {
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(0, 94),
+            Size = UDim2.new(1, 0, 1, -94),
+            ScrollBarThickness = 3,
+            ScrollBarImageColor3 = THEME.Muted,
+            ScrollingDirection = Enum.ScrollingDirection.Y,
+            ElasticBehavior = Enum.ElasticBehavior.Never,
+            AutomaticCanvasSize = Enum.AutomaticSize.Y,
+            CanvasSize = UDim2.new(),
+        }, inner)
+        New("UIGridLayout", {
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            CellSize = UDim2.new(1 / 3, -6, 0, 108),
+            CellPadding = UDim2.fromOffset(6, 6),
+        }, side.Scroll)
+        New("UIPadding", { PaddingRight = UDim.new(0, 4) }, side.Scroll)
+
+        -- category popup (drawn over the grid)
+        local popup = New("ScrollingFrame", {
+            Visible = false,
+            ZIndex = 20,
+            BorderSizePixel = 0,
+            BackgroundColor3 = THEME.Popup,
+            BackgroundTransparency = 0.02,
+            Position = UDim2.fromOffset(0, 54),
+            Size = UDim2.new(1, 0, 0, math.min(#groups * 30 + 8, 200)),
+            ScrollBarThickness = 3,
+            AutomaticCanvasSize = Enum.AutomaticSize.Y,
+            CanvasSize = UDim2.new(),
+        }, inner)
+        Round(popup, 8)
+        Stroke(popup, 0.8)
+        New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2) }, popup)
+        New("UIPadding", {
+            PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4),
+            PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4),
+        }, popup)
+
+        for index, group in ipairs(groups) do
+            local item = New("TextButton", {
+                Text = group.Title .. "   ·   " .. #group.Entries,
+                Font = FONT,
+                TextSize = 13,
+                TextColor3 = THEME.Text,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                AutoButtonColor = false,
+                BorderSizePixel = 0,
+                BackgroundColor3 = THEME.Card,
+                BackgroundTransparency = 0.94,
+                LayoutOrder = index,
+                ZIndex = 21,
+                Size = UDim2.new(1, 0, 0, 28),
+            }, popup)
+            Round(item, 6)
+            New("UIPadding", { PaddingLeft = UDim.new(0, 10) }, item)
+            item.MouseEnter:Connect(function() item.BackgroundTransparency = 0.85 end)
+            item.MouseLeave:Connect(function() item.BackgroundTransparency = 0.94 end)
+            item.MouseButton1Click:Connect(function()
+                side.Group = index
+                categoryLabel.Text = group.Title
+                popup.Visible = false
+                side.Scroll.CanvasPosition = Vector2.zero
+                for entry in pairs(failedPreview) do failedPreview[entry] = nil end
                 Refresh()
-            end
+            end)
+        end
+
+        categoryButton.MouseButton1Click:Connect(function() popup.Visible = not popup.Visible end)
+
+        search:GetPropertyChangedSignal("Text"):Connect(function()
+            side.Query = search.Text
+            side.Scroll.CanvasPosition = Vector2.zero
+            Refresh()
         end)
-        return side
-    end
 
-    BuildSide("Base", "Base Emote", "Category of the emote you will change.", "lucide:music", true)
-    BuildSide("Target", "Target Emote", "Category of the emote it will look like.", "lucide:drama", false)
-
-    local collecting = false
-    local function StartCollector()
-        if collecting or not PreviewsOn() then return end
-        collecting = true
-        task.spawn(function()
-            local list, missing = {}, 0
-            for _, group in ipairs(groups) do
-                for _, entry in ipairs(group.Entries) do
-                    table.insert(list, entry)
-                    if not Preview.PoseKnown(entry) then missing = missing + 1 end
-                end
-            end
-            if missing == 0 then return end
-            if missing > 20 then Notify("Visual Emotes", "Preparing " .. missing .. " emote previews in the background (one time only)...", 4) end
-            local collected = Preview.Collect(list)
-            if missing > 20 and collected > 0 then Notify("Visual Emotes", "Emote previews are ready.", 3) end
+        local scrollToken = 0
+        side.Scroll:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+            scrollToken = scrollToken + 1
+            local mine = scrollToken
+            task.delay(0.08, function()
+                if mine == scrollToken then RefreshVisible(side) end
+            end)
         end)
     end
 
-    local warmed = false
-    local header = Section.Frame and Section.Frame:FindFirstChild("Header", true)
-    if header then
-        header.MouseButton1Click:Connect(function()
-            if not warmed then
-                warmed = true
-                Bake(sides.Base)
-                StartCollector()
-            end
-        end)
-    end
+    NewSide("Base", "Base Emote")
+    NewSide("Target", "Target Emote")
 
+    -- Swaps drop the old preview models (the items changed) and rebuild them.
     local function Forget(entries)
         for _, entry in ipairs(entries) do
             Preview.Invalidate(entry)
             failedPreview[entry] = nil
+            for _, side in pairs(sides) do
+                local tile = side.TileByEntry[entry]
+                if tile then DetachView(tile) end
+            end
         end
     end
 
-    SwapButton = Section:Button({
-        Title = "Swap",
-        Desc = "Pick a Base and a Target emote first.",
-        Icon = "lucide:repeat",
-        Callback = function()
-            local state = Swap.GetState(base, target)
-            if state == 1 then
-                Notify("Swap Unavailable", "Please make sure you picked a valid Base and Target emote.", 3)
-                return
-            end
-
-            local pair = { base, target }
-            local ok, message
-            if state == 2 then
-                ok, message = Swap.Swap(base, target)
-                Notify(ok and "Swap Successful!" or "Swap Failed", message, 3)
-            else
-                ok, message = Swap.Revert(base, target)
-                Notify(ok and "Revert Successful!" or "Revert Failed", message, 3)
-            end
-
-            if ok then Forget(pair) end
-
-            base, target, notifiedWhitelist = nil, nil, false
-            Refresh()
-            Bake(sides.Base)
-            Bake(sides.Target)
+    SwapButton.MouseButton1Click:Connect(function()
+        local base, target = sides.Base.Selected, sides.Target.Selected
+        local state = Swap.GetState(base, target)
+        if state == 1 then
+            SetStatus("Pick a valid Base and Target emote first.", THEME.Danger)
+            return
         end
-    })
 
-    Section:Button({
-        Title = "Revert All",
-        Desc = "Put every swapped emote back to normal.",
-        Icon = "lucide:rotate-ccw",
-        Callback = function()
-            local restored, touched = Swap.RevertAll()
-            Notify("Visual Emotes", restored > 0 and ("Restored " .. restored .. " swapped pair(s).") or "Nothing is swapped.", 3)
-            Forget(touched)
-            base, target, notifiedWhitelist = nil, nil, false
-            Refresh()
-            Bake(sides.Base)
-            Bake(sides.Target)
+        local pair = { base, target }
+        local ok, message
+        if state == 2 then
+            ok, message = Swap.Swap(base, target)
+            SetStatus(ok and (base.Display .. " now looks like " .. target.Display) or message, ok and THEME.Success or THEME.Danger)
+        else
+            ok, message = Swap.Revert(base, target)
+            SetStatus(ok and "Restored to normal." or message, ok and THEME.Success or THEME.Danger)
         end
-    })
+
+        if ok then Forget(pair) end
+        sides.Base.Selected, sides.Target.Selected = nil, nil
+        Refresh()
+    end)
+
+    RevertAllButton.MouseButton1Click:Connect(function()
+        local restored, touched = Swap.RevertAll()
+        Forget(touched)
+        sides.Base.Selected, sides.Target.Selected = nil, nil
+        Refresh()
+        SetStatus(restored > 0 and ("Restored " .. restored .. " swapped pair(s).") or "Nothing is swapped.", restored > 0 and THEME.Success or THEME.SubText)
+    end)
 
     Refresh()
+
+    -- Poses of every emote are gathered quietly in the background (once; saved to a file), so
+    -- opening any category later is instant.
+    task.spawn(function()
+        if not PreviewsOn() then return end
+        local list, missing = {}, 0
+        for _, group in ipairs(groups) do
+            for _, entry in ipairs(group.Entries) do
+                table.insert(list, entry)
+                if not Preview.PoseKnown(entry) then missing = missing + 1 end
+            end
+        end
+        if missing == 0 then return end
+        if missing > 20 then SetStatus("Preparing " .. missing .. " emote previews in the background (one time only)...") end
+        Preview.Collect(list)
+    end)
 end
 
 local Swap = NewSwap({ Category = "Emotes", Paths = DaftarPath, Noun = "emote" })
-BuildGridUI(Section, Swap)
+BuildEmoteUI(Swap)
