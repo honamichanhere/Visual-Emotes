@@ -1013,28 +1013,46 @@ local DaftarPath = {
 
 
 -- ==========================================================
--- UI: own implementation, styled after Mugiwara UI
--- (dark glass window, white cards, warm accent). Layout: Base on the left, Target on the
--- right, each with a category dropdown, a search box and an always-open grid of previews.
+-- UI: own implementation that copies the look of Mugiwara UI (Gear 5 theme): glass window over a
+-- wallpaper, spinning neon border, gradient title / badge / buttons, white translucent cards,
+-- dark inset fields and picture cells with a check badge. Layout: Base left, Target right, each
+-- with a category dropdown, a search box and an always-open grid of previews.
 -- ==========================================================
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 
 local VERSION = "v2.0"
+local WALLPAPER = "rbxassetid://132136264088686"
+
+local function rgb(r, g, b) return Color3.fromRGB(r, g, b) end
 
 local THEME = {
-    Background = Color3.fromRGB(12, 13, 21),
-    Field = Color3.fromRGB(0, 0, 0),
-    Card = Color3.fromRGB(255, 255, 255),
-    Popup = Color3.fromRGB(14, 14, 20),
-    Text = Color3.fromRGB(247, 247, 252),
-    SubText = Color3.fromRGB(192, 194, 210),
-    Muted = Color3.fromRGB(134, 136, 154),
-    Accent = Color3.fromRGB(255, 150, 40),
-    OnAccent = Color3.fromRGB(28, 12, 8),
-    Success = Color3.fromRGB(80, 230, 150),
-    Danger = Color3.fromRGB(255, 72, 92),
+    Background = rgb(12, 13, 21), BackgroundAlpha = 0.22,
+    Card = rgb(255, 255, 255), CardAlpha = 0.91,
+    Stroke = rgb(255, 255, 255), StrokeAlpha = 0.84,
+    Field = rgb(0, 0, 0), FieldAlpha = 0.45,
+    Popup = rgb(14, 14, 20), PopupAlpha = 0.08,
+    Text = rgb(252, 252, 255), SubText = rgb(200, 204, 220), Muted = rgb(142, 146, 164),
+    Accent = rgb(255, 255, 255), OnAccent = rgb(16, 18, 30),
+    Success = rgb(80, 230, 150), Danger = rgb(255, 72, 92),
 }
-local FONT, FONT_BOLD = Enum.Font.Gotham, Enum.Font.GothamBold
+local GRADIENT_STOPS = { rgb(255, 255, 255), rgb(224, 234, 255), rgb(255, 247, 226), rgb(255, 224, 160) }
+
+local function Linear(stops)
+    local points = {}
+    for index, color in ipairs(stops) do
+        points[index] = ColorSequenceKeypoint.new((index - 1) / (#stops - 1), color)
+    end
+    return ColorSequence.new(points)
+end
+local GRADIENT = Linear(GRADIENT_STOPS)
+local CYCLE = (function()
+    local mirrored = table.clone(GRADIENT_STOPS)
+    for index = #GRADIENT_STOPS - 1, 1, -1 do table.insert(mirrored, GRADIENT_STOPS[index]) end
+    return Linear(mirrored)
+end)()
+
+local FONT_TITLE, FONT_LABEL, FONT_BODY = Enum.Font.GothamBold, Enum.Font.GothamSemibold, Enum.Font.GothamMedium
 
 local function New(class, props, parent)
     local instance = Instance.new(class)
@@ -1047,20 +1065,24 @@ local function Round(instance, radius)
     return New("UICorner", { CornerRadius = UDim.new(0, radius) }, instance)
 end
 
-local function Stroke(instance, transparency, color)
+local function Stroke(instance, transparency, thickness, color)
     return New("UIStroke", {
-        Color = color or THEME.Card,
+        Color = color or THEME.Stroke,
         Transparency = transparency,
-        Thickness = 1,
+        Thickness = thickness or 1,
         ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
     }, instance)
+end
+
+local function Gradient(parent, rotation, sequence)
+    return New("UIGradient", { Rotation = rotation or 0, Color = sequence or GRADIENT }, parent)
 end
 
 local function Label(parent, props)
     local merged = {
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
-        Font = FONT,
+        Font = FONT_BODY,
         TextColor3 = THEME.Text,
         TextSize = 13,
         TextXAlignment = Enum.TextXAlignment.Left,
@@ -1069,33 +1091,104 @@ local function Label(parent, props)
     return New("TextLabel", merged, parent)
 end
 
-local function MakeButton(parent, text, primary, width)
-    local button = New("TextButton", {
-        Text = text,
-        Font = FONT_BOLD,
-        TextSize = 13,
-        AutoButtonColor = false,
-        BorderSizePixel = 0,
-        Size = UDim2.fromOffset(width, 30),
-        BackgroundColor3 = primary and Color3.new(1, 1, 1) or THEME.Card,
-        BackgroundTransparency = primary and 0 or 0.92,
-        TextColor3 = primary and THEME.OnAccent or THEME.Text,
+local function Tween(instance, props, duration, style)
+    TweenService:Create(instance, TweenInfo.new(duration or 0.2, style or Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
+end
+
+local spinTweens = {}
+local function Spin(gradient, seconds)
+    local tween = TweenService:Create(gradient, TweenInfo.new(seconds, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1), { Rotation = gradient.Rotation + 360 })
+    tween:Play()
+    table.insert(spinTweens, tween)
+end
+RegisterCleanup(function()
+    for _, tween in ipairs(spinTweens) do pcall(function() tween:Cancel() end) end
+end)
+
+-- Icons drawn from rotated bars, like Mugiwara UI draws its own glyphs.
+local function Glyph(parent, size)
+    return New("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.fromOffset(size, size),
+        BackgroundTransparency = 1,
     }, parent)
-    Round(button, 8)
-    if primary then
-        New("UIGradient", {
-            Rotation = 90,
-            Color = ColorSequence.new(Color3.fromRGB(255, 200, 62), Color3.fromRGB(255, 122, 26)),
-        }, button)
-    else
-        Stroke(button, 0.85)
+end
+
+local function Bar(root, length, thickness, rotation, x, y, color)
+    local bar = New("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale(x, y),
+        Size = UDim2.fromOffset(length, thickness),
+        Rotation = rotation,
+        BackgroundColor3 = color,
+        BorderSizePixel = 0,
+    }, root)
+    Round(bar, thickness)
+    return bar
+end
+
+local function ChevronGlyph(parent, size, color)
+    local root = Glyph(parent, size)
+    local length = size * 0.56
+    return root, { Bar(root, length, 2, 45, 0.31, 0.5, color), Bar(root, length, 2, -45, 0.69, 0.5, color) }
+end
+
+local function CheckGlyph(parent, size, color)
+    local root = Glyph(parent, size)
+    Bar(root, size * 0.34, 2, 42, 0.3, 0.63, color)
+    Bar(root, size * 0.64, 2, -48, 0.63, 0.51, color)
+    return root
+end
+
+local function CloseGlyph(parent, size, color)
+    local root = Glyph(parent, size)
+    return { Bar(root, size * 0.78, 2, 45, 0.5, 0.5, color), Bar(root, size * 0.78, 2, -45, 0.5, 0.5, color) }
+end
+
+local function MinusGlyph(parent, size, color)
+    local root = Glyph(parent, size)
+    return { Bar(root, size * 0.7, 2, 0, 0.5, 0.5, color) }
+end
+
+-- A pill button: gradient fill (primary) or a white translucent card (secondary).
+local function MakeButton(parent, text, primary, width)
+    local pill = New("Frame", {
+        Size = UDim2.fromOffset(width, 32),
+        BackgroundColor3 = primary and Color3.new(1, 1, 1) or THEME.Card,
+        BackgroundTransparency = primary and 0 or THEME.CardAlpha,
+        BorderSizePixel = 0,
+    }, parent)
+    Round(pill, 9)
+    if primary then Gradient(pill, 0) else Stroke(pill, THEME.StrokeAlpha) end
+    local label = Label(pill, {
+        Text = text,
+        Font = FONT_TITLE,
+        TextColor3 = primary and THEME.OnAccent or THEME.Text,
+        TextXAlignment = Enum.TextXAlignment.Center,
+        Size = UDim2.fromScale(1, 1),
+    })
+    local hit = New("TextButton", { Text = "", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 3 }, pill)
+    local button = { Frame = pill, Label = label, Hit = hit, Primary = primary, Width = width }
+    hit.MouseButton1Down:Connect(function()
+        Tween(pill, { Size = UDim2.fromOffset(width - 6, 28) }, 0.08)
+    end)
+    hit.MouseButton1Up:Connect(function()
+        Tween(pill, { Size = UDim2.fromOffset(width, 32) }, 0.3, Enum.EasingStyle.Back)
+    end)
+    hit.MouseLeave:Connect(function()
+        Tween(pill, { Size = UDim2.fromOffset(width, 32) }, 0.2)
+    end)
+    if not primary then
+        hit.MouseEnter:Connect(function() Tween(pill, { BackgroundTransparency = 0.84 }, 0.15) end)
+        hit.MouseLeave:Connect(function() Tween(pill, { BackgroundTransparency = THEME.CardAlpha }, 0.2) end)
     end
     return button
 end
 
-local function SetEnabled(button, primary, enabled)
-    button.BackgroundTransparency = enabled and (primary and 0 or 0.92) or 0.6
-    button.TextTransparency = enabled and 0 or 0.45
+local function SetEnabled(button, enabled)
+    button.Frame.BackgroundTransparency = enabled and (button.Primary and 0 or THEME.CardAlpha) or 0.6
+    button.Label.TextTransparency = enabled and 0 or 0.45
 end
 
 local guiParent
@@ -1106,92 +1199,213 @@ local Gui = New("ScreenGui", {
     Name = "VisualEmotes",
     ResetOnSpawn = false,
     IgnoreGuiInset = true,
-    DisplayOrder = 9999,
+    DisplayOrder = 10000,
     ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 }, guiParent)
 RegisterCleanup(function() pcall(function() Gui:Destroy() end) end)
 
 local camera = workspace.CurrentCamera
 local screen = camera and camera.ViewportSize or Vector2.new(1280, 720)
-local WIDTH = math.min(660, screen.X - 24)
-local HEIGHT = math.min(440, screen.Y - 24)
-local TITLE_H, BAR_H = 40, 48
+local WIDTH = math.min(680, screen.X - 24)
+local HEIGHT = math.min(470, screen.Y - 24)
+local TOPBAR, BAR_H = 54, 56
 
 local Main = New("Frame", {
     Name = "Main",
     AnchorPoint = Vector2.new(0.5, 0.5),
     Position = UDim2.fromScale(0.5, 0.5),
     Size = UDim2.fromOffset(WIDTH, HEIGHT),
-    BackgroundColor3 = THEME.Background,
-    BackgroundTransparency = 0.08,
-    BorderSizePixel = 0,
+    BackgroundTransparency = 1,
 }, Gui)
-Round(Main, 12)
-Stroke(Main, 0.84)
 
-local TitleBar = New("Frame", { Name = "TitleBar", Size = UDim2.new(1, 0, 0, TITLE_H), BackgroundTransparency = 1 }, Main)
-Label(TitleBar, {
-    Text = 'Visual Emotes  <font color="#868a9a" size="12">by Honami  ·  ' .. VERSION .. "</font>",
-    RichText = true,
-    Font = FONT_BOLD,
-    TextSize = 15,
-    Position = UDim2.fromOffset(14, 0),
-    Size = UDim2.new(1, -90, 1, 0),
+local Pop = New("Frame", {
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromScale(0.5, 0.5),
+    Size = UDim2.fromScale(1, 1),
+    BackgroundTransparency = 1,
+}, Main)
+local PopScale = New("UIScale", { Scale = 0.9 }, Pop)
+
+-- neon glow rings behind the window
+local glowRings = {}
+for _, layer in ipairs({ { 0, 3, 0.5 }, { 3, 7, 0.8 }, { 10, 14, 0.92 } }) do
+    local pad, thickness, transparency = layer[1], layer[2], layer[3]
+    local ring = New("Frame", {
+        Name = "Glow",
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.new(1, pad * 2, 1, pad * 2),
+        BackgroundTransparency = 1,
+    }, Pop)
+    Round(ring, 16 + pad)
+    local stroke = Stroke(ring, 1, thickness)
+    Spin(Gradient(stroke, 0, CYCLE), 9)
+    table.insert(glowRings, { Stroke = stroke, Base = transparency })
+end
+
+local Win = New("CanvasGroup", {
+    Name = "Window",
+    Size = UDim2.fromScale(1, 1),
+    BackgroundColor3 = THEME.Background,
+    BackgroundTransparency = THEME.BackgroundAlpha,
+    GroupTransparency = 1,
+    BorderSizePixel = 0,
+}, Pop)
+Round(Win, 16)
+
+New("ImageLabel", {
+    Name = "Wallpaper",
+    Size = UDim2.fromScale(1, 1),
+    BackgroundTransparency = 1,
+    Image = WALLPAPER,
+    ImageTransparency = 0.3,
+    ScaleType = Enum.ScaleType.Crop,
+}, Win)
+New("Frame", { Name = "Scrim", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.6, BorderSizePixel = 0 }, Win)
+
+-- glass wash + sheen
+local wash = New("Frame", { Name = "Wash", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 }, Win)
+Gradient(wash, 35).Transparency = NumberSequence.new({
+    NumberSequenceKeypoint.new(0, 0.86), NumberSequenceKeypoint.new(0.5, 1), NumberSequenceKeypoint.new(1, 0.9),
+})
+local sheen = New("Frame", { Name = "Sheen", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 }, Win)
+New("UIGradient", {
+    Rotation = 20,
+    Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.92), NumberSequenceKeypoint.new(0.35, 1), NumberSequenceKeypoint.new(1, 0.97),
+    }),
+}, sheen)
+
+-- spinning neon border above the window
+local border = New("Frame", { Name = "Border", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 5 }, Pop)
+Round(border, 16)
+local borderStroke = Stroke(border, 1, 1.5)
+Spin(Gradient(borderStroke, 0, CYCLE), 9)
+table.insert(glowRings, { Stroke = borderStroke, Base = 0.3 })
+
+-- topbar
+local TopBar = New("Frame", { Name = "Topbar", Size = UDim2.new(1, 0, 0, TOPBAR), BackgroundTransparency = 1 }, Win)
+
+local brand = New("Frame", {
+    AnchorPoint = Vector2.new(0, 0.5),
+    Position = UDim2.new(0, 16, 0.5, 0),
+    Size = UDim2.fromOffset(30, 30),
+    BackgroundColor3 = Color3.new(1, 1, 1),
+    BorderSizePixel = 0,
+}, TopBar)
+Round(brand, 9)
+Gradient(brand, 45)
+Label(brand, {
+    Text = "V",
+    Font = Enum.Font.GothamBlack,
+    TextSize = 17,
+    TextColor3 = THEME.OnAccent,
+    TextXAlignment = Enum.TextXAlignment.Center,
+    Size = UDim2.fromScale(1, 1),
 })
 
-local function TitleButton(text, offsetX, hoverColor)
+local titleRow = New("Frame", {
+    Position = UDim2.fromOffset(56, 8),
+    Size = UDim2.new(1, -200, 0, 22),
+    BackgroundTransparency = 1,
+}, TopBar)
+New("UIListLayout", {
+    FillDirection = Enum.FillDirection.Horizontal,
+    VerticalAlignment = Enum.VerticalAlignment.Center,
+    Padding = UDim.new(0, 8),
+}, titleRow)
+local titleLabel = Label(titleRow, {
+    Text = "Visual Emotes",
+    Font = FONT_TITLE,
+    TextSize = 16,
+    TextColor3 = Color3.new(1, 1, 1),
+    AutomaticSize = Enum.AutomaticSize.X,
+    Size = UDim2.fromOffset(0, 20),
+    LayoutOrder = 1,
+})
+Gradient(titleLabel, 0)
+
+local versionPill = New("Frame", {
+    Size = UDim2.fromOffset(0, 16),
+    AutomaticSize = Enum.AutomaticSize.X,
+    BackgroundColor3 = Color3.new(1, 1, 1),
+    BorderSizePixel = 0,
+    LayoutOrder = 2,
+}, titleRow)
+Round(versionPill, 8)
+New("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, versionPill)
+Gradient(versionPill, 0)
+Label(versionPill, {
+    Text = VERSION,
+    Font = FONT_TITLE,
+    TextSize = 11,
+    TextColor3 = THEME.OnAccent,
+    TextXAlignment = Enum.TextXAlignment.Center,
+    AutomaticSize = Enum.AutomaticSize.X,
+    Size = UDim2.fromOffset(0, 16),
+})
+
+Label(TopBar, {
+    Text = "by Honami",
+    TextSize = 12,
+    TextColor3 = THEME.SubText,
+    Position = UDim2.fromOffset(56, 30),
+    Size = UDim2.new(1, -200, 0, 14),
+})
+
+local function ControlButton(offset, makeGlyph, hoverColor)
     local button = New("TextButton", {
-        Text = text,
-        Font = FONT_BOLD,
-        TextSize = 16,
-        TextColor3 = THEME.SubText,
+        Text = "",
         AutoButtonColor = false,
         BorderSizePixel = 0,
-        BackgroundColor3 = THEME.Card,
-        BackgroundTransparency = 0.94,
+        BackgroundColor3 = Color3.new(1, 1, 1),
+        BackgroundTransparency = 1,
         AnchorPoint = Vector2.new(1, 0.5),
-        Position = UDim2.new(1, offsetX, 0.5, 0),
-        Size = UDim2.fromOffset(26, 26),
-    }, TitleBar)
-    Round(button, 7)
+        Position = UDim2.new(1, offset, 0.5, 0),
+        Size = UDim2.fromOffset(34, 34),
+    }, TopBar)
+    Round(button, 9)
+    local bars = makeGlyph(button, 20, THEME.SubText)
     button.MouseEnter:Connect(function()
-        button.BackgroundColor3 = hoverColor or THEME.Card
-        button.BackgroundTransparency = hoverColor and 0.6 or 0.85
+        Tween(button, { BackgroundTransparency = 0.88 }, 0.15)
+        for _, bar in ipairs(bars) do Tween(bar, { BackgroundColor3 = hoverColor or THEME.Text }, 0.15) end
     end)
     button.MouseLeave:Connect(function()
-        button.BackgroundColor3 = THEME.Card
-        button.BackgroundTransparency = 0.94
+        Tween(button, { BackgroundTransparency = 1 }, 0.2)
+        for _, bar in ipairs(bars) do Tween(bar, { BackgroundColor3 = THEME.SubText }, 0.2) end
     end)
     return button
 end
 
-local CloseButton = TitleButton("×", -10, THEME.Danger)
-local MinimizeButton = TitleButton("–", -42)
+local CloseButton = ControlButton(-12, CloseGlyph, THEME.Danger)
+local MinimizeButton = ControlButton(-50, MinusGlyph)
 
-New("Frame", {
-    Position = UDim2.fromOffset(0, TITLE_H),
+local topLine = New("Frame", {
+    Position = UDim2.fromOffset(0, TOPBAR),
     Size = UDim2.new(1, 0, 0, 1),
-    BackgroundColor3 = THEME.Card,
-    BackgroundTransparency = 0.9,
+    BackgroundColor3 = Color3.new(1, 1, 1),
     BorderSizePixel = 0,
-}, Main)
+}, Win)
+Gradient(topLine, 0).Transparency = NumberSequence.new({
+    NumberSequenceKeypoint.new(0, 0.9), NumberSequenceKeypoint.new(0.5, 0.6), NumberSequenceKeypoint.new(1, 0.9),
+})
 
 local Body = New("Frame", {
     Name = "Body",
-    Position = UDim2.fromOffset(0, TITLE_H + 1),
-    Size = UDim2.new(1, 0, 1, -(TITLE_H + 1)),
+    Position = UDim2.fromOffset(0, TOPBAR + 1),
+    Size = UDim2.new(1, 0, 1, -(TOPBAR + 1)),
     BackgroundTransparency = 1,
-}, Main)
+}, Win)
 
 local PaneHolder = New("Frame", { Name = "Panes", Size = UDim2.new(1, 0, 1, -BAR_H), BackgroundTransparency = 1 }, Body)
 New("UIPadding", {
-    PaddingTop = UDim.new(0, 10), PaddingLeft = UDim.new(0, 10),
-    PaddingRight = UDim.new(0, 10), PaddingBottom = UDim.new(0, 6),
+    PaddingTop = UDim.new(0, 12), PaddingLeft = UDim.new(0, 12),
+    PaddingRight = UDim.new(0, 12), PaddingBottom = UDim.new(0, 8),
 }, PaneHolder)
 New("UIListLayout", {
     FillDirection = Enum.FillDirection.Horizontal,
     SortOrder = Enum.SortOrder.LayoutOrder,
-    Padding = UDim.new(0, 8),
+    Padding = UDim.new(0, 10),
 }, PaneHolder)
 
 local BottomBar = New("Frame", {
@@ -1203,28 +1417,28 @@ local BottomBar = New("Frame", {
 }, Body)
 New("Frame", {
     Size = UDim2.new(1, 0, 0, 1),
-    BackgroundColor3 = THEME.Card,
-    BackgroundTransparency = 0.9,
+    BackgroundColor3 = THEME.Stroke,
+    BackgroundTransparency = THEME.StrokeAlpha,
     BorderSizePixel = 0,
 }, BottomBar)
 
 local StatusLabel = Label(BottomBar, {
-    Position = UDim2.fromOffset(14, 0),
-    Size = UDim2.new(1, -270, 1, 0),
+    Position = UDim2.fromOffset(16, 0),
+    Size = UDim2.new(1, -290, 1, 0),
     TextColor3 = THEME.SubText,
     TextTruncate = Enum.TextTruncate.AtEnd,
 })
-local RevertAllButton = MakeButton(BottomBar, "Revert All", false, 100)
-RevertAllButton.AnchorPoint = Vector2.new(1, 0.5)
-RevertAllButton.Position = UDim2.new(1, -10, 0.5, 0)
-local SwapButton = MakeButton(BottomBar, "Swap", true, 130)
-SwapButton.AnchorPoint = Vector2.new(1, 0.5)
-SwapButton.Position = UDim2.new(1, -118, 0.5, 0)
+local RevertAllButton = MakeButton(BottomBar, "Revert All", false, 104)
+RevertAllButton.Frame.AnchorPoint = Vector2.new(1, 0.5)
+RevertAllButton.Frame.Position = UDim2.new(1, -12, 0.5, 0)
+local SwapButton = MakeButton(BottomBar, "Swap", true, 140)
+SwapButton.Frame.AnchorPoint = Vector2.new(1, 0.5)
+SwapButton.Frame.Position = UDim2.new(1, -128, 0.5, 0)
 
--- Window behaviour: drag by the title bar, minimize, close.
+-- Window behaviour: drag by the topbar, minimize, close.
 do
     local dragging, dragStart, startPosition = false, nil, nil
-    TitleBar.InputBegan:Connect(function(input)
+    TopBar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging, dragStart, startPosition = true, input.Position, Main.Position
             input.Changed:Connect(function()
@@ -1244,13 +1458,18 @@ do
     MinimizeButton.MouseButton1Click:Connect(function()
         minimized = not minimized
         Body.Visible = not minimized
-        Main.Size = minimized and UDim2.fromOffset(WIDTH, TITLE_H) or UDim2.fromOffset(WIDTH, HEIGHT)
+        Tween(Main, { Size = minimized and UDim2.fromOffset(WIDTH, TOPBAR + 1) or UDim2.fromOffset(WIDTH, HEIGHT) }, 0.3, Enum.EasingStyle.Quint)
     end)
     CloseButton.MouseButton1Click:Connect(function()
         local fns = cleanupFns
         cleanupFns = {}
         for _, fn in ipairs(fns) do pcall(fn) end
     end)
+
+    -- open animation: pop in and fade the glow up
+    Tween(PopScale, { Scale = 1 }, 0.45, Enum.EasingStyle.Back)
+    Tween(Win, { GroupTransparency = 0 }, 0.35)
+    for _, ring in ipairs(glowRings) do Tween(ring.Stroke, { Transparency = ring.Base }, 0.45) end
 end
 
 -- ==========================================================
@@ -1288,6 +1507,7 @@ end
 
 -- Same camera as the game's emote menu: in front, a little to the right and above.
 local LOOK_DIRECTION = Vector3.new(4.25, 1.7, -8.5).Unit
+local CELL_HEIGHT, TITLE_HEIGHT, GAP = 108, 20, 6
 
 local function BuildEmoteUI(Swap)
     if Swap.Load() == 0 then
@@ -1298,8 +1518,8 @@ local function BuildEmoteUI(Swap)
             TextXAlignment = Enum.TextXAlignment.Center,
             Size = UDim2.fromScale(1, 1),
         })
-        SwapButton.Visible = false
-        RevertAllButton.Visible = false
+        SwapButton.Frame.Visible = false
+        RevertAllButton.Frame.Visible = false
         return
     end
 
@@ -1346,7 +1566,7 @@ local function BuildEmoteUI(Swap)
         return previewState
     end
 
-    -- ---------- tiles ----------
+    -- ---------- cells ----------
     local function AttachView(tile)
         if tile.View then return end
         local model = Preview.Get(tile.Entry)
@@ -1357,7 +1577,7 @@ local function BuildEmoteUI(Swap)
             Size = UDim2.fromScale(1, 1),
             Ambient = Color3.fromRGB(190, 190, 190),
             LightColor = Color3.fromRGB(255, 255, 255),
-        }, tile.Holder)
+        }, tile.Thumb)
         local clone = model:Clone()
         clone.Parent = view
 
@@ -1380,12 +1600,13 @@ local function BuildEmoteUI(Swap)
         tile.Placeholder.Visible = true
     end
 
-    local function UpdateTileLook(side, tile)
-        local selected = side.Selected == tile.Entry
-        tile.Stroke.Color = selected and THEME.Accent or THEME.Card
-        tile.Stroke.Transparency = selected and 0 or 0.88
-        tile.Stroke.Thickness = selected and 2 or 1
-        tile.Name.TextColor3 = selected and THEME.Text or THEME.SubText
+    local function PaintTile(side, tile, hovered)
+        local on = side.Selected == tile.Entry
+        tile.Button.BackgroundTransparency = on and 0.82 or (hovered and 0.9 or 0.95)
+        tile.Badge.Visible = on
+        tile.Stroke.Color = on and THEME.Accent or THEME.Stroke
+        tile.Stroke.Transparency = on and 0.2 or (hovered and 0.7 or THEME.StrokeAlpha)
+        tile.Stroke.Thickness = on and 1.5 or 1
     end
 
     local function Pick(side, entry)
@@ -1399,17 +1620,23 @@ local function BuildEmoteUI(Swap)
             Text = "",
             AutoButtonColor = false,
             BorderSizePixel = 0,
-            BackgroundColor3 = THEME.Field,
-            BackgroundTransparency = 0.55,
+            BackgroundColor3 = Color3.new(1, 1, 1),
+            BackgroundTransparency = 0.95,
         }, side.Scroll)
-        Round(button, 8)
-        local stroke = Stroke(button, 0.88)
-        local holder = New("Frame", {
-            BackgroundTransparency = 1,
+        Round(button, 10)
+        local stroke = Stroke(button, THEME.StrokeAlpha)
+
+        local thumb = New("Frame", {
+            Name = "Thumb",
+            Position = UDim2.fromOffset(5, 5),
+            Size = UDim2.new(1, -10, 0, CELL_HEIGHT - 10 - TITLE_HEIGHT),
+            BackgroundColor3 = THEME.Field,
+            BackgroundTransparency = THEME.FieldAlpha,
             ClipsDescendants = true,
-            Size = UDim2.new(1, 0, 1, -24),
+            BorderSizePixel = 0,
         }, button)
-        local placeholder = Label(holder, {
+        Round(thumb, 7)
+        local placeholder = Label(thumb, {
             Text = "…",
             TextSize = 18,
             TextColor3 = THEME.Muted,
@@ -1418,14 +1645,32 @@ local function BuildEmoteUI(Swap)
         })
         local name = Label(button, {
             Text = TitleOf(entry),
-            TextSize = 11,
-            TextColor3 = THEME.SubText,
+            Font = FONT_LABEL,
+            TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Center,
             TextTruncate = Enum.TextTruncate.AtEnd,
-            Position = UDim2.new(0, 5, 1, -22),
-            Size = UDim2.new(1, -10, 0, 20),
+            Position = UDim2.new(0, 6, 0, CELL_HEIGHT - TITLE_HEIGHT - 2),
+            Size = UDim2.new(1, -12, 0, TITLE_HEIGHT),
         })
+
+        local badge = New("Frame", {
+            Name = "Badge",
+            AnchorPoint = Vector2.new(1, 0),
+            Position = UDim2.new(1, -9, 0, 9),
+            Size = UDim2.fromOffset(18, 18),
+            BackgroundColor3 = THEME.Accent,
+            BorderSizePixel = 0,
+            Visible = false,
+            ZIndex = 3,
+        }, button)
+        Round(badge, 9)
+        CheckGlyph(badge, 12, THEME.OnAccent)
+
+        local tile = { Entry = entry, Button = button, Stroke = stroke, Thumb = thumb, Placeholder = placeholder, Name = name, Badge = badge }
+        button.MouseEnter:Connect(function() PaintTile(side, tile, true) end)
+        button.MouseLeave:Connect(function() PaintTile(side, tile, false) end)
         button.MouseButton1Click:Connect(function() Pick(side, entry) end)
-        return { Entry = entry, Button = button, Stroke = stroke, Holder = holder, Placeholder = placeholder, Name = name }
+        return tile
     end
 
     local function DestroyTile(tile)
@@ -1433,8 +1678,8 @@ local function BuildEmoteUI(Swap)
         tile.Button:Destroy()
     end
 
-    -- Only tiles near the visible part of the scroll list hold a viewport; each one is a separate
-    -- render surface that is redrawn every frame.
+    -- Only cells near the visible part of the list hold a viewport; each one is a separate render
+    -- surface that is redrawn every frame.
     local function IsNear(side, tile)
         local scroll = side.Scroll
         local top = scroll.CanvasPosition.Y
@@ -1520,17 +1765,17 @@ local function BuildEmoteUI(Swap)
         end
         side.TileList, side.TileByEntry = list, map
 
-        for _, tile in ipairs(list) do UpdateTileLook(side, tile) end
+        for _, tile in ipairs(list) do PaintTile(side, tile, false) end
 
         local selected = side.Selected
         side.SelectedLabel.Text = selected and TitleOf(selected) or "None selected"
-        side.SelectedLabel.TextColor3 = selected and THEME.Accent or THEME.Muted
+        side.SelectedLabel.TextColor3 = selected and THEME.Text or THEME.Muted
     end
 
     local function UpdateButton()
         local state = Swap.GetState(sides.Base.Selected, sides.Target.Selected)
-        SwapButton.Text = state == 3 and "Revert" or "Swap"
-        SetEnabled(SwapButton, true, state ~= 1)
+        SwapButton.Label.Text = state == 3 and "Revert" or "Swap"
+        SetEnabled(SwapButton, state ~= 1)
     end
 
     Refresh = function()
@@ -1543,6 +1788,22 @@ local function BuildEmoteUI(Swap)
         end
     end
 
+    -- dark inset field (Base.Field in Mugiwara UI)
+    local function Field(parent, position, size, class, props)
+        local merged = {
+            BorderSizePixel = 0,
+            BackgroundColor3 = THEME.Field,
+            BackgroundTransparency = THEME.FieldAlpha,
+            Position = position,
+            Size = size,
+        }
+        for key, value in pairs(props or {}) do merged[key] = value end
+        local field = New(class, merged, parent)
+        Round(field, 8)
+        Stroke(field, 0.9)
+        return field
+    end
+
     local function NewSide(sideName, titleText)
         local side = {
             Name = sideName, Group = 1, Query = "", Selected = nil,
@@ -1553,9 +1814,9 @@ local function BuildEmoteUI(Swap)
         local frame = New("Frame", {
             Name = sideName,
             LayoutOrder = sideName == "Base" and 1 or 2,
-            Size = UDim2.new(0.5, -4, 1, 0),
+            Size = UDim2.new(0.5, -5, 1, 0),
             BackgroundColor3 = THEME.Card,
-            BackgroundTransparency = 0.94,
+            BackgroundTransparency = THEME.CardAlpha,
             BorderSizePixel = 0,
         }, PaneHolder)
         Round(frame, 10)
@@ -1563,11 +1824,11 @@ local function BuildEmoteUI(Swap)
 
         local inner = New("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 }, frame)
         New("UIPadding", {
-            PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
-            PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8),
+            PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10),
+            PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10),
         }, inner)
 
-        Label(inner, { Text = titleText, Font = FONT_BOLD, Size = UDim2.new(0.5, 0, 0, 18) })
+        Label(inner, { Text = titleText, Font = FONT_TITLE, TextSize = 15, Size = UDim2.new(0.5, 0, 0, 20) })
         side.SelectedLabel = Label(inner, {
             Text = "None selected",
             TextSize = 12,
@@ -1575,63 +1836,45 @@ local function BuildEmoteUI(Swap)
             TextXAlignment = Enum.TextXAlignment.Right,
             TextTruncate = Enum.TextTruncate.AtEnd,
             Position = UDim2.fromScale(0.5, 0),
-            Size = UDim2.new(0.5, 0, 0, 18),
+            Size = UDim2.new(0.5, 0, 0, 20),
         })
 
         -- category dropdown
-        local categoryButton = New("TextButton", {
-            Text = "",
-            AutoButtonColor = false,
-            BorderSizePixel = 0,
-            BackgroundColor3 = THEME.Field,
-            BackgroundTransparency = 0.55,
-            Position = UDim2.fromOffset(0, 22),
-            Size = UDim2.new(1, 0, 0, 30),
-        }, inner)
-        Round(categoryButton, 8)
-        Stroke(categoryButton, 0.9)
+        local categoryButton = Field(inner, UDim2.fromOffset(0, 26), UDim2.new(1, 0, 0, 32), "TextButton", { Text = "", AutoButtonColor = false })
         local categoryLabel = Label(categoryButton, {
             Text = groups[1].Title,
+            Font = FONT_LABEL,
             Position = UDim2.fromOffset(10, 0),
-            Size = UDim2.new(1, -34, 1, 0),
+            Size = UDim2.new(1, -36, 1, 0),
             TextTruncate = Enum.TextTruncate.AtEnd,
         })
-        Label(categoryButton, {
-            Text = "v",
-            TextSize = 12,
-            TextColor3 = THEME.Muted,
-            TextXAlignment = Enum.TextXAlignment.Center,
-            AnchorPoint = Vector2.new(1, 0),
-            Position = UDim2.fromScale(1, 0),
-            Size = UDim2.new(0, 26, 1, 0),
-        })
+        local chevronHolder = New("Frame", {
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -8, 0.5, 0),
+            Size = UDim2.fromOffset(16, 16),
+            BackgroundTransparency = 1,
+        }, categoryButton)
+        ChevronGlyph(chevronHolder, 14, THEME.SubText)
 
         -- search
-        local search = New("TextBox", {
+        local search = Field(inner, UDim2.fromOffset(0, 64), UDim2.new(1, 0, 0, 32), "TextBox", {
             Text = "",
             PlaceholderText = "Search emote...",
             PlaceholderColor3 = THEME.Muted,
             TextColor3 = THEME.Text,
-            Font = FONT,
+            Font = FONT_BODY,
             TextSize = 13,
             TextXAlignment = Enum.TextXAlignment.Left,
             ClearTextOnFocus = false,
-            BorderSizePixel = 0,
-            BackgroundColor3 = THEME.Field,
-            BackgroundTransparency = 0.55,
-            Position = UDim2.fromOffset(0, 58),
-            Size = UDim2.new(1, 0, 0, 30),
-        }, inner)
-        Round(search, 8)
-        Stroke(search, 0.9)
+        })
         New("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, search)
 
         -- grid, open from the start
         side.Scroll = New("ScrollingFrame", {
             BackgroundTransparency = 1,
             BorderSizePixel = 0,
-            Position = UDim2.fromOffset(0, 94),
-            Size = UDim2.new(1, 0, 1, -94),
+            Position = UDim2.fromOffset(0, 104),
+            Size = UDim2.new(1, 0, 1, -104),
             ScrollBarThickness = 3,
             ScrollBarImageColor3 = THEME.Muted,
             ScrollingDirection = Enum.ScrollingDirection.Y,
@@ -1639,12 +1882,15 @@ local function BuildEmoteUI(Swap)
             AutomaticCanvasSize = Enum.AutomaticSize.Y,
             CanvasSize = UDim2.new(),
         }, inner)
+        New("UIPadding", {
+            PaddingTop = UDim.new(0, 3), PaddingBottom = UDim.new(0, 3),
+            PaddingLeft = UDim.new(0, 3), PaddingRight = UDim.new(0, 6),
+        }, side.Scroll)
         New("UIGridLayout", {
             SortOrder = Enum.SortOrder.LayoutOrder,
-            CellSize = UDim2.new(1 / 3, -6, 0, 108),
-            CellPadding = UDim2.fromOffset(6, 6),
+            CellSize = UDim2.new(1 / 3, -math.ceil(GAP * 2 / 3), 0, CELL_HEIGHT),
+            CellPadding = UDim2.fromOffset(GAP, GAP),
         }, side.Scroll)
-        New("UIPadding", { PaddingRight = UDim.new(0, 4) }, side.Scroll)
 
         -- category popup (drawn over the grid)
         local popup = New("ScrollingFrame", {
@@ -1652,51 +1898,65 @@ local function BuildEmoteUI(Swap)
             ZIndex = 20,
             BorderSizePixel = 0,
             BackgroundColor3 = THEME.Popup,
-            BackgroundTransparency = 0.02,
-            Position = UDim2.fromOffset(0, 54),
-            Size = UDim2.new(1, 0, 0, math.min(#groups * 30 + 8, 200)),
+            BackgroundTransparency = THEME.PopupAlpha,
+            Position = UDim2.fromOffset(0, 62),
+            Size = UDim2.new(1, 0, 0, math.min(#groups * 32 + 10, 210)),
             ScrollBarThickness = 3,
             AutomaticCanvasSize = Enum.AutomaticSize.Y,
             CanvasSize = UDim2.new(),
         }, inner)
-        Round(popup, 8)
+        Round(popup, 10)
         Stroke(popup, 0.8)
         New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2) }, popup)
         New("UIPadding", {
-            PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4),
-            PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4),
+            PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 5),
+            PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 5),
         }, popup)
+
+        local items = {}
+        local function PaintItems()
+            for index, item in ipairs(items) do
+                item.TextColor3 = index == side.Group and THEME.Accent or THEME.Text
+            end
+        end
 
         for index, group in ipairs(groups) do
             local item = New("TextButton", {
                 Text = group.Title .. "   ·   " .. #group.Entries,
-                Font = FONT,
+                Font = FONT_LABEL,
                 TextSize = 13,
                 TextColor3 = THEME.Text,
                 TextXAlignment = Enum.TextXAlignment.Left,
                 AutoButtonColor = false,
                 BorderSizePixel = 0,
-                BackgroundColor3 = THEME.Card,
-                BackgroundTransparency = 0.94,
+                BackgroundColor3 = Color3.new(1, 1, 1),
+                BackgroundTransparency = 0.95,
                 LayoutOrder = index,
                 ZIndex = 21,
-                Size = UDim2.new(1, 0, 0, 28),
+                Size = UDim2.new(1, 0, 0, 30),
             }, popup)
-            Round(item, 6)
+            Round(item, 7)
             New("UIPadding", { PaddingLeft = UDim.new(0, 10) }, item)
-            item.MouseEnter:Connect(function() item.BackgroundTransparency = 0.85 end)
-            item.MouseLeave:Connect(function() item.BackgroundTransparency = 0.94 end)
+            item.MouseEnter:Connect(function() Tween(item, { BackgroundTransparency = 0.88 }, 0.12) end)
+            item.MouseLeave:Connect(function() Tween(item, { BackgroundTransparency = 0.95 }, 0.15) end)
             item.MouseButton1Click:Connect(function()
                 side.Group = index
                 categoryLabel.Text = group.Title
                 popup.Visible = false
+                Tween(chevronHolder, { Rotation = 0 }, 0.2)
+                PaintItems()
                 side.Scroll.CanvasPosition = Vector2.zero
                 for entry in pairs(failedPreview) do failedPreview[entry] = nil end
                 Refresh()
             end)
+            items[index] = item
         end
+        PaintItems()
 
-        categoryButton.MouseButton1Click:Connect(function() popup.Visible = not popup.Visible end)
+        categoryButton.MouseButton1Click:Connect(function()
+            popup.Visible = not popup.Visible
+            Tween(chevronHolder, { Rotation = popup.Visible and 180 or 0 }, 0.2)
+        end)
 
         search:GetPropertyChangedSignal("Text"):Connect(function()
             side.Query = search.Text
@@ -1729,7 +1989,7 @@ local function BuildEmoteUI(Swap)
         end
     end
 
-    SwapButton.MouseButton1Click:Connect(function()
+    SwapButton.Hit.MouseButton1Click:Connect(function()
         local base, target = sides.Base.Selected, sides.Target.Selected
         local state = Swap.GetState(base, target)
         if state == 1 then
@@ -1752,7 +2012,7 @@ local function BuildEmoteUI(Swap)
         Refresh()
     end)
 
-    RevertAllButton.MouseButton1Click:Connect(function()
+    RevertAllButton.Hit.MouseButton1Click:Connect(function()
         local restored, touched = Swap.RevertAll()
         Forget(touched)
         sides.Base.Selected, sides.Target.Selected = nil, nil
