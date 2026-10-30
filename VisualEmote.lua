@@ -1740,6 +1740,8 @@ local function BuildEmoteUI(Swap)
     end
 
     local groups = BuildGroups(Swap.GetEntries())
+    local byName = {}
+    for _, entry in ipairs(Swap.GetEntries()) do byName[entry.Name] = entry end
     local sides = {}
     local failedPreview = {}
     local previewState = nil
@@ -1831,6 +1833,9 @@ local function BuildEmoteUI(Swap)
     local function Pick(side, entry)
         side.Selected = (side.Selected ~= entry) and entry or nil
         Refresh()
+        if side.Selected and Swap.GetWhitelist(side.Selected) then
+            SetStatus("Whitelist applied! This emote is restricted to a specific pair.", THEME.Swapped)
+        end
     end
 
     local function MakeTile(side, entry)
@@ -1964,10 +1969,18 @@ local function BuildEmoteUI(Swap)
         local other = side == sides.Base and sides.Target or sides.Base
         local query = string.lower(side.Query)
 
+        -- an emote with a required partner (whitelist) only lets that partner show on the other side
+        local onlyName = other.Selected and Swap.GetWhitelist(other.Selected) or nil
+
         local entries = {}
-        for _, entry in ipairs(groups[side.Group].Entries) do
-            if entry ~= other.Selected and (query == "" or string.find(string.lower(entry.Display), query, 1, true)) then
-                table.insert(entries, entry)
+        if onlyName then
+            local partner = byName[onlyName]
+            if partner then entries[1] = partner end
+        else
+            for _, entry in ipairs(groups[side.Group].Entries) do
+                if entry ~= other.Selected and (query == "" or string.find(string.lower(entry.Display), query, 1, true)) then
+                    table.insert(entries, entry)
+                end
             end
         end
 
@@ -1998,6 +2011,13 @@ local function BuildEmoteUI(Swap)
     end
 
     Refresh = function()
+        -- selections that no longer fit a whitelist pair (or are the same emote) are dropped
+        local base, target = sides.Base.Selected, sides.Target.Selected
+        local targetOnly = base and Swap.GetWhitelist(base) or nil
+        local baseOnly = target and Swap.GetWhitelist(target) or nil
+        if target and ((targetOnly and target.Name ~= targetOnly) or target == base) then sides.Target.Selected = nil end
+        if base and ((baseOnly and base.Name ~= baseOnly) or base == target) then sides.Base.Selected = nil end
+
         RenderSide(sides.Base)
         RenderSide(sides.Target)
         UpdateButton()
@@ -2290,5 +2310,13 @@ local function BuildEmoteUI(Swap)
     end)
 end
 
-local Swap = NewSwap({ Category = "Emotes", Paths = DaftarPath, Noun = "emote" })
+-- These emotes can only be swapped with their partner (and the other way round).
+local WHITELIST = {
+    RockinStride = "Kickback",
+    Kickback = "RockinStride",
+    ZombieStride = "ClassicDance",
+    ClassicDance = "ZombieStride",
+}
+
+local Swap = NewSwap({ Category = "Emotes", Paths = DaftarPath, Whitelist = WHITELIST, Noun = "emote" })
 BuildEmoteUI(Swap)
