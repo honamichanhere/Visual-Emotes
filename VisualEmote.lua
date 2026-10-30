@@ -1034,6 +1034,7 @@ local THEME = {
     Text = rgb(252, 252, 255), SubText = rgb(200, 204, 220), Muted = rgb(142, 146, 164),
     Accent = rgb(255, 255, 255), OnAccent = rgb(16, 18, 30),
     Success = rgb(80, 230, 150), Danger = rgb(255, 72, 92),
+    Swapped = rgb(255, 200, 62),
 }
 local GRADIENT_STOPS = { rgb(255, 255, 255), rgb(224, 234, 255), rgb(255, 247, 226), rgb(255, 224, 160) }
 
@@ -1817,11 +1818,14 @@ local function BuildEmoteUI(Swap)
 
     local function PaintTile(side, tile, hovered)
         local on = side.Selected == tile.Entry
-        tile.Button.BackgroundTransparency = on and 0.82 or (hovered and 0.9 or 0.95)
+        -- already swapped: the whole cell is tinted gold so it stands out in the list
+        local swapped = Swap.GetPartner(tile.Entry) ~= nil
+        tile.Button.BackgroundColor3 = swapped and THEME.Swapped or Color3.new(1, 1, 1)
+        tile.Button.BackgroundTransparency = swapped and (on and 0.68 or (hovered and 0.74 or 0.8)) or (on and 0.82 or (hovered and 0.9 or 0.95))
         tile.Badge.Visible = on
-        tile.Stroke.Color = on and THEME.Accent or THEME.Stroke
-        tile.Stroke.Transparency = on and 0.2 or (hovered and 0.7 or THEME.StrokeAlpha)
-        tile.Stroke.Thickness = on and 1.5 or 1
+        tile.Stroke.Color = on and THEME.Accent or (swapped and THEME.Swapped or THEME.Stroke)
+        tile.Stroke.Transparency = on and 0.2 or (swapped and 0.35 or (hovered and 0.7 or THEME.StrokeAlpha))
+        tile.Stroke.Thickness = (on or swapped) and 1.5 or 1
     end
 
     local function Pick(side, entry)
