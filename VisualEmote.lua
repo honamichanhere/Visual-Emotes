@@ -3,6 +3,16 @@
 -- Games/Evade/VisualSwap.lua, EmotePreview.lua and VisualGridUI.lua (Carry and the hub's
 -- premium-lock plumbing removed - this script has no premium tier of its own).
 
+-- Only runs in Evade (same place ids as Mugiwara HUB); in any other game nothing is loaded.
+local EVADE_PLACE_IDS = { [9872472334] = true, [99214917572799] = true, [10668472534] = true }
+if not EVADE_PLACE_IDS[game.PlaceId] then
+    warn("[Visual Emotes] This script only works in Evade.")
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", { Title = "Visual Emotes", Text = "This script only works in Evade.", Duration = 6 })
+    end)
+    return
+end
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
